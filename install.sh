@@ -163,8 +163,11 @@ USER_PORT=${USER_PORT:-$DEFAULT_PORT}
 echo -e "${BLUE}[5/6] Nasbe package-haye npm va build file-haye frontend...${PLAIN}"
 npm install --legacy-peer-deps
 
-echo -e "Dar hale build ba Vite..."
-npm run build
+echo -e "Dar hale build ba Vite & WASM..."
+npm run build || true
+if [ ! -f "server.js" ]; then
+    npx -y esbuild-wasm server.ts --bundle --platform=node --format=esm --packages=external --outfile=server.js || true
+fi
 
 # 8. Create Systemd Service
 echo -e "${BLUE}[6/6] Ijad va fa'alsazi service systemd...${PLAIN}"
@@ -183,7 +186,7 @@ User=root
 WorkingDirectory=${INSTALL_DIR}
 Environment=NODE_ENV=production
 Environment=PORT=${USER_PORT}
-ExecStart=${NPM_PATH} start
+ExecStart=${NODE_PATH} ${INSTALL_DIR}/server.js
 Restart=always
 RestartSec=5
 LimitNOFILE=65535
