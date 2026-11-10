@@ -105,6 +105,10 @@ if [ -f "./server.ts" ] && [ -f "./package.json" ]; then
     mkdir -p "$INSTALL_DIR"
     cp -ru ./* "$INSTALL_DIR/" 2>/dev/null || true
 else
+    # Clean previous directory if exists to prevent git clone collision
+    if [ -d "$INSTALL_DIR" ]; then
+        rm -rf "$INSTALL_DIR"
+    fi
     mkdir -p "$INSTALL_DIR"
     DOWNLOAD_SUCCESS=false
 
