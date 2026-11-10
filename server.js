@@ -6,7 +6,6 @@ import path2 from "path";
 import fs2 from "fs";
 import { execSync } from "child_process";
 import { fileURLToPath } from "url";
-import { createServer as createViteServer } from "vite";
 
 // bridgeStore.ts
 import fs from "fs";
@@ -1409,6 +1408,7 @@ async function startServer() {
   });
   const isProd = process.env.NODE_ENV === "production";
   if (!isProd) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa"
@@ -1418,7 +1418,27 @@ async function startServer() {
     const distPath = path2.resolve(__dirname, "dist");
     app.use(express.static(distPath));
     app.get("*", (_req, res) => {
-      res.sendFile(path2.join(distPath, "index.html"));
+      const indexPath = path2.join(distPath, "index.html");
+      if (fs2.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(200).send(`
+          <!DOCTYPE html>
+          <html lang="fa" dir="rtl">
+          <head><meta charset="UTF-8"><title>Sanaei Bridge</title></head>
+          <body style="background:#0f172a; color:#f8fafc; font-family:system-ui,sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0;">
+            <div style="background:#1e293b; padding:32px; border-radius:16px; max-width:540px; text-align:center; box-shadow:0 10px 25px rgba(0,0,0,0.5); border:1px solid #334155;">
+              <h2 style="color:#38bdf8; margin-top:0;">\u0633\u0631\u0648\u06CC\u0633 \u0633\u0631\u0648\u0631 \u0641\u0639\u0627\u0644 \u0648 \u0622\u0646\u0644\u0627\u06CC\u0646 \u0627\u0633\u062A \u2705</h2>
+              <p style="color:#94a3b8; font-size:14px; line-height:1.6;">\u0633\u0631\u0648\u06CC\u0633 backend \u0631\u0648\u06CC \u067E\u0648\u0631\u062A 3000 \u0641\u0639\u0627\u0644 \u0627\u0633\u062A \u0627\u0645\u0627 \u0641\u0627\u06CC\u0644\u200C\u0647\u0627\u06CC \u0641\u0631\u0627\u0646\u062A\u200C\u0627\u0646\u062F \u0647\u0646\u0648\u0632 \u0628\u06CC\u0644\u062F \u0646\u0634\u062F\u0647\u200C\u0627\u0646\u062F.</p>
+              <div style="background:#020617; padding:12px; border-radius:8px; font-family:monospace; direction:ltr; text-align:left; color:#4ade80; font-size:12px; margin:20px 0; overflow-x:auto;">
+                cd /usr/local/sanaei-bridge && npm install --legacy-peer-deps && npm run build && systemctl restart sanaei-bridge
+              </div>
+              <p style="font-size:12px; color:#64748b;">\u067E\u0633 \u0627\u0632 \u0627\u062C\u0631\u0627\u06CC \u062F\u0633\u062A\u0648\u0631 \u0641\u0648\u0642 \u062F\u0631 \u062A\u0631\u0645\u06CC\u0646\u0627\u0644\u060C \u0627\u06CC\u0646 \u0635\u0641\u062D\u0647 \u0631\u0627 \u0631\u0641\u0631\u0634 \u0641\u0631\u0645\u0627\u06CC\u06CC\u062F.</p>
+            </div>
+          </body>
+          </html>
+        `);
+      }
     });
   }
   const PORT = Number(process.env.PORT) || 3e3;

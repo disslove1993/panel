@@ -5,7 +5,6 @@ import path from 'path';
 import fs from 'fs';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import { createServer as createViteServer } from 'vite';
 import { bridgeStore } from './bridgeStore';
 import {
   registerSanaeiEngine,
@@ -1182,6 +1181,7 @@ async function startServer() {
 
   const isProd = process.env.NODE_ENV === 'production';
   if (!isProd) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -1191,7 +1191,27 @@ async function startServer() {
     const distPath = path.resolve(__dirname, 'dist');
     app.use(express.static(distPath));
     app.get('*', (_req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      const indexPath = path.join(distPath, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(200).send(`
+          <!DOCTYPE html>
+          <html lang="fa" dir="rtl">
+          <head><meta charset="UTF-8"><title>Sanaei Bridge</title></head>
+          <body style="background:#0f172a; color:#f8fafc; font-family:system-ui,sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0;">
+            <div style="background:#1e293b; padding:32px; border-radius:16px; max-width:540px; text-align:center; box-shadow:0 10px 25px rgba(0,0,0,0.5); border:1px solid #334155;">
+              <h2 style="color:#38bdf8; margin-top:0;">سرویس سرور فعال و آنلاین است ✅</h2>
+              <p style="color:#94a3b8; font-size:14px; line-height:1.6;">سرویس backend روی پورت 3000 فعال است اما فایل‌های فرانت‌اند هنوز بیلد نشده‌اند.</p>
+              <div style="background:#020617; padding:12px; border-radius:8px; font-family:monospace; direction:ltr; text-align:left; color:#4ade80; font-size:12px; margin:20px 0; overflow-x:auto;">
+                cd /usr/local/sanaei-bridge && npm install --legacy-peer-deps && npm run build && systemctl restart sanaei-bridge
+              </div>
+              <p style="font-size:12px; color:#64748b;">پس از اجرای دستور فوق در ترمینال، این صفحه را رفرش فرمایید.</p>
+            </div>
+          </body>
+          </html>
+        `);
+      }
     });
   }
 
