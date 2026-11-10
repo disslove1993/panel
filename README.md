@@ -1,11 +1,82 @@
-<div align="center">
+# Sanaei Panel Manager & Mobile App Bridge API
+### پنل مدیریتی ثنایی (3X-UI) و پل ارتباطی اتوماتیک اپلیکیشن موبایل (Middleware)
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+این پروژه یک پنل تحت وب کامل و یک سرویس واسط (Backend Bridge) بین **اپلیکیشن‌های موبایل (VPN / Proxy Client)** و **پنل ثنایی (3X-UI / X-UI)** است. با استفاده از این سرویس:
+- کاربران در اپلیکیشن موبایل ثبت‌نام کرده و توکن (مثلاً ۱۰۰۰ توکن) دریافت می‌کنند.
+- پلن‌های ترافیکی (مثلاً ۱ ماه ۱۰ گیگابایت) را در اپلیکیشن مشاهده می‌کنند.
+- به محض خرید یا درخواست اتصال، یک کلاینت اختصاصی روی این‌باند پنل ثنایی ساخته شده و لینک اتصال `vless://` به اپلیکیشن داده می‌شود.
 
-  <h1>Built with AI Studio</h2>
+---
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+## 🚀 نصب سریع روی سرور مجازی (One-Line Installer)
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+برای نصب خودکار این پنل روی سرور مجازی لینوکس (اوبونتو، دبیان، سنت‌او‌اس)، کافیست در ترمینال سرور خود دستور زیر را اجرا کنید:
 
-</div>
+```bash
+bash <(curl -Ls https://raw.githubusercontent.com/disslove1993/panel/main/install.sh)
+```
+
+این اسکریپت تمام مراحل شامل نصب Node.js، پکیج‌ها، بیلد پروژه، ایجاد سرویس خودکار systemd و ابزار مدیریت `sanaei-bridge` را به طور خودکار انجام می‌دهد.
+
+---
+
+## 🛠️ دستور مدیریت پنل در سرور: `sanaei-bridge`
+
+پس از اتمام نصب، در هر کجای ترمینال سرور با تایپ دستور:
+
+```bash
+sanaei-bridge
+```
+
+یک منوی فارسی باز می‌شود که می‌توانید:
+1. مشاهده وضعیت سرویس (Status)
+2. راه‌اندازی مجدد پنل (Restart)
+3. توقف یا شروع سرویس (Stop / Start)
+4. مشاهده لاگ‌های زنده اتصالات (Logs)
+5. دریافت بروزرسانی‌های جدید از گیت‌هاب (Update)
+6. **تنظیم دامنه اختصاصی با Nginx و گواهی SSL رایگان Let's Encrypt**
+7. تغییر پورت اجرای برنامه
+
+---
+
+## 📦 نحوه آپلود و ارسال پروژه به گیت‌هاب (GitHub)
+
+برای اینکه پروژه را در ریپازیتوری `disslove1993/panel` قرار دهید:
+
+```bash
+git init
+git add .
+git commit -m "Initial commit of Sanaei Bridge Panel"
+git branch -M main
+git remote add origin https://github.com/disslove1993/panel.git
+git push -u origin main
+```
+
+---
+
+## 🌐 تنظیم دامنه اختصاصی (Custom Domain & SSL)
+
+۱. در پنل دامنه خود (مثل کلودفلر یا ارائه‌دهنده دامنه)، یک رکورد **A Record** بسازید که به آی‌پی سرور مجازی شما اشاره کند:
+   - نام: `api` (یا هر زیردامنه دلخواه)
+   - مقدار (IP): `آی‌پی سرور مجازی شما`
+   - در صورت استفاده از کلودفلر، حالت پروکسی (ابر نارنجی) را موقتاً خاموش یا روشن بگذارید.
+
+۲. در سرور خود دستور `sanaei-bridge` را زده و گزینه **7** را انتخاب کنید و نام دامنه را وارد نمایید. اسکریپت به صورت خودکار Nginx را کانفیگ کرده و گواهی SSL رایگان صادر می‌کند.
+
+آدرس‌های دسترسی شما:
+- پنل تحت وب: `https://api.yourdomain.com`
+- آدرس API برای اپلیکیشن موبایل: `https://api.yourdomain.com/api/bridge`
+
+---
+
+## 📱 متدهای API برای اپلیکیشن موبایل
+
+| متد | آدرس Endpoint | توضیحات |
+| :--- | :--- | :--- |
+| `POST` | `/api/bridge/register` | ثبت‌نام کاربر با ایمیل و اختصاص ۱۰۰۰ توکن اولیه |
+| `POST` | `/api/bridge/login` | ورود کاربر و بازیابی وضعیت اشتراک |
+| `GET` | `/api/bridge/plans` | لیست بسته‌های اشتراک (۱۰ گیگابایت ۱ ماهه و ...) |
+| `POST` | `/api/bridge/purchase` | اتصال به ثنایی، ساخت کلاینت و صدور لینک `vless://` |
+| `GET` | `/api/bridge/user/:email` | وضعیت حجم مصرفی و روزهای باقی‌مانده |
+| `GET` | `/api/bridge/servers` | لیست سرورها با پینگ، پرچم و پروتکل |
+| `GET` | `/api/bridge/config/:email` | دریافت رشته خام کانفیگ VLESS جهت اتصال VPN |

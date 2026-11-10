@@ -1,0 +1,6 @@
+{
+  "name": "Sanaei Panel Manager (مدیریت پنل ثنایی)",
+  "description": "پنل مدیریتی تحت وب برای اتصال دستی به پنل‌های ثنایی (3x-ui / X-UI)، مشاهده و مدیریت این‌باندها، کاربران، ترافیک مصرفی و دریافت لینک‌های اتصال.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
