@@ -630,7 +630,7 @@ async function startServer() {
   app.get('/source.tar.gz', (_req, res) => {
     try {
       const tarPath = '/tmp/sanaei-bridge-dist.tar.gz';
-      execSync(`tar --exclude='./node_modules' --exclude='./dist' --exclude='./.git' -czf ${tarPath} -C "${__dirname}" .`);
+      execSync(`tar --exclude='./node_modules' --exclude='./.git' -czf ${tarPath} -C "${__dirname}" .`);
       res.setHeader('Content-Type', 'application/gzip');
       res.setHeader('Content-Disposition', 'attachment; filename="sanaei-bridge.tar.gz"');
       res.setHeader('Cache-Control', 'no-cache');

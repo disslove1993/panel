@@ -157,7 +157,7 @@ USER_PORT=${USER_PORT:-$DEFAULT_PORT}
 
 # 7. Install NPM Dependencies & Build
 echo -e "${BLUE}[5/6] Nasbe package-haye npm va build file-haye frontend...${PLAIN}"
-npm install --include=dev
+npm install --legacy-peer-deps
 
 echo -e "Dar hale build ba Vite..."
 npm run build
@@ -244,7 +244,7 @@ show_menu() {
             echo -e "${CYAN}Dar hale daryafte update az GitHub...${PLAIN}"
             cd "$INSTALL_DIR" || exit
             git pull
-            npm install --include=dev
+            npm install --legacy-peer-deps
             npm run build
             systemctl restart sanaei-bridge
             echo -e "${GREEN}Beroozresani ba movafaghiat anjam shod!${PLAIN}"
