@@ -525,9 +525,15 @@ export default function App() {
             e.preventDefault();
             setActiveSection('inbounds');
           }}
-          className="text-base font-bold tracking-tight text-slate-900 dark:text-slate-100 whitespace-nowrap shrink-0"
+          className="text-base font-black tracking-tight text-slate-900 dark:text-slate-100 whitespace-nowrap shrink-0 flex items-center gap-2"
         >
-          مدیریت پنل ثنایی
+          <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-purple-600 to-sky-500 flex items-center justify-center text-white shadow-md shadow-purple-500/20">
+            <Eye className="w-4 h-4" />
+          </span>
+          <span>پنل چشمک</span>
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20 hidden sm:inline-block">
+            Cheshmak v3
+          </span>
         </a>
 
         {/* Zone 2: 4 concise single-line navigation links */}

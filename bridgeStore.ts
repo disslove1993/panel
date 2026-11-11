@@ -61,6 +61,8 @@ const DEFAULT_SETTINGS: BridgeSettings = {
   adminPassword: 'admin',
   defaultInboundId: 4, // Inbound 4 (AI-Cloudflare-CDN)
   welcomeTokens: 1000, // 1000 Tokens given to new users by default (matching the app UI)
+  freeTrialTrafficGB: 1, // 1 GB test traffic
+  freeTrialDays: 3, // 3 days test period
   sanaeiPanelUrl: 'https://panel.wpbaharak.ir:2053',
   sanaeiWebBasePath: '/',
   sanaeiUsername: 'disslove22',
@@ -202,6 +204,44 @@ class BridgeStoreManager {
 
   getPlanById(planId: string): BridgePlan | undefined {
     return this.getPlans().find((p) => p.id === planId);
+  }
+
+  addPlan(plan: BridgePlan): BridgePlan {
+    if (!this.data.settings.plans) {
+      this.data.settings.plans = [...DEFAULT_PLANS];
+    }
+    const exists = this.data.settings.plans.find((p) => p.id === plan.id);
+    if (exists) {
+      Object.assign(exists, plan);
+    } else {
+      this.data.settings.plans.push(plan);
+    }
+    this.saveToDisk();
+    return plan;
+  }
+
+  updatePlan(planId: string, partial: Partial<BridgePlan>): BridgePlan | undefined {
+    if (!this.data.settings.plans) {
+      this.data.settings.plans = [...DEFAULT_PLANS];
+    }
+    const plan = this.data.settings.plans.find((p) => p.id === planId);
+    if (!plan) return undefined;
+    Object.assign(plan, partial);
+    this.saveToDisk();
+    return plan;
+  }
+
+  deletePlan(planId: string): boolean {
+    if (!this.data.settings.plans) {
+      this.data.settings.plans = [...DEFAULT_PLANS];
+    }
+    const initialLen = this.data.settings.plans.length;
+    this.data.settings.plans = this.data.settings.plans.filter((p) => p.id !== planId);
+    if (this.data.settings.plans.length !== initialLen) {
+      this.saveToDisk();
+      return true;
+    }
+    return false;
   }
 
   getAllUsers(): BridgeUser[] {

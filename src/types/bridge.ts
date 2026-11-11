@@ -123,6 +123,8 @@ export interface BridgeSettings {
   adminPassword?: string;
   defaultInboundId: number;
   welcomeTokens: number;
+  freeTrialTrafficGB?: number;
+  freeTrialDays?: number;
   sanaeiPanelUrl: string;
   sanaeiWebBasePath: string;
   sanaeiUsername: string;

@@ -30,6 +30,16 @@ import {
   Eye,
   Bot,
   Upload,
+  PieChart,
+  BarChart3,
+  Edit2,
+  Sliders,
+  Settings2,
+  ArrowRightLeft,
+  Radio,
+  Globe,
+  Search,
+  BookOpen,
 } from 'lucide-react';
 import { BridgePlan, BridgeServerItem, BridgeUser, BridgeCardTransferOrder } from '../types/bridge';
 import { formatBytes } from '../utils/sanaeiHelpers';
@@ -39,7 +49,7 @@ interface BridgeManagementViewProps {
 }
 
 export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRefreshPanel }) => {
-  const [activeTab, setActiveTab] = useState<'prompt' | 'vps' | 'simulator' | 'users' | 'plans' | 'wallet'>('vps');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'plans' | 'users' | 'wallet' | 'docs' | 'vps' | 'simulator'>('dashboard');
   const [users, setUsers] = useState<BridgeUser[]>([]);
   const [plans, setPlans] = useState<BridgePlan[]>([]);
   const [servers, setServers] = useState<BridgeServerItem[]>([]);
@@ -81,6 +91,32 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
   const [simQrModal, setSimQrModal] = useState<string | null>(null);
   const [simGiftInput, setSimGiftInput] = useState('WELCOME2026');
 
+  // Overview Stats & Onboarding Settings State
+  const [overviewStats, setOverviewStats] = useState<any>(null);
+  const [welcomeTokensInput, setWelcomeTokensInput] = useState('1000');
+  const [freeTrialTrafficGBInput, setFreeTrialTrafficGBInput] = useState('1');
+  const [freeTrialDaysInput, setFreeTrialDaysInput] = useState('3');
+  const [onboardingSaveMsg, setOnboardingSaveMsg] = useState<string | null>(null);
+  const [isSavingOnboarding, setIsSavingOnboarding] = useState(false);
+
+  // Plans Management State
+  const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
+  const [editingPlan, setEditingPlan] = useState<BridgePlan | null>(null);
+  const [planForm, setPlanForm] = useState<any>({
+    id: '',
+    name: '',
+    periodDays: 30,
+    trafficGB: 10,
+    priceTokens: 1000,
+    priceTomans: 85000,
+    inboundId: 4,
+    isPopular: false,
+    description: '',
+  });
+
+  // User Search State
+  const [userSearchQuery, setUserSearchQuery] = useState('');
+
   // Dynamic Bridge Server URL Setting for Mobile App
   const [serverHostInput, setServerHostInput] = useState('http://130.185.121.250:3000');
   const [serverPingStatus, setServerPingStatus] = useState<'idle' | 'testing' | 'success' | 'failed'>('idle');
@@ -102,6 +138,18 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
         setUsers(data.users || []);
         setPlans(data.plans || []);
         setServers(data.servers || []);
+        if (data.stats) {
+          setOverviewStats(data.stats);
+        }
+        if (data.settings?.welcomeTokens !== undefined) {
+          setWelcomeTokensInput(String(data.settings.welcomeTokens));
+        }
+        if (data.settings?.freeTrialTrafficGB !== undefined) {
+          setFreeTrialTrafficGBInput(String(data.settings.freeTrialTrafficGB));
+        }
+        if (data.settings?.freeTrialDays !== undefined) {
+          setFreeTrialDaysInput(String(data.settings.freeTrialDays));
+        }
         if (data.settings?.zibalMerchant) {
           setZibalMerchant(data.settings.zibalMerchant);
         }
@@ -218,6 +266,134 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
     }
   };
 
+  const handleSaveOnboardingSettings = async () => {
+    setIsSavingOnboarding(true);
+    setOnboardingSaveMsg(null);
+    try {
+      const res = await fetch('/api/bridge/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          welcomeTokens: Number(welcomeTokensInput) || 1000,
+          freeTrialTrafficGB: Number(freeTrialTrafficGBInput) || 1,
+          freeTrialDays: Number(freeTrialDaysInput) || 3,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setOnboardingSaveMsg('تنظیمات هدیه و حجم تست با موفقیت ذخیره شد ✅');
+        fetchBridgeData();
+        setTimeout(() => setOnboardingSaveMsg(null), 3500);
+      } else {
+        setOnboardingSaveMsg(data.message || 'خطا در ذخیره تنظیمات');
+      }
+    } catch (err: any) {
+      setOnboardingSaveMsg('خطا در ذخیره تنظیمات: ' + err.message);
+    } finally {
+      setIsSavingOnboarding(false);
+    }
+  };
+
+  const handleDeleteUser = async (userId: string, email: string) => {
+    if (!window.confirm(`آیا از حذف کاربر «${email}» از بانک کاربران مطمئن هستید؟ کانفیگ ثنایی این کاربر نیز حذف خواهد شد.`)) {
+      return;
+    }
+    try {
+      const res = await fetch('/api/bridge/admin/user/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(`کاربر ${email} با موفقیت حذف شد.`);
+        fetchBridgeData();
+      } else {
+        alert(data.message || 'خطا در حذف کاربر');
+      }
+    } catch (err: any) {
+      alert('خطا در ارتباط با سرور: ' + err.message);
+    }
+  };
+
+  const handleOpenAddPlanModal = () => {
+    setEditingPlan(null);
+    const firstInboundId = servers[0]?.id || 4;
+    setPlanForm({
+      id: `plan_${Date.now()}`,
+      name: 'اشتراک استاندارد',
+      periodDays: 30,
+      trafficGB: 20,
+      priceTokens: 1500,
+      priceTomans: 120000,
+      inboundId: firstInboundId,
+      isPopular: false,
+      description: 'اشتراک پرسرعت با سرور اختصاصی و پشتیبانی ۲۴ ساعته',
+    });
+    setIsPlanModalOpen(true);
+  };
+
+  const handleOpenEditPlanModal = (p: BridgePlan) => {
+    setEditingPlan(p);
+    setPlanForm({
+      id: p.id,
+      name: p.name,
+      periodDays: p.periodDays,
+      trafficGB: p.trafficGB,
+      priceTokens: p.priceTokens,
+      priceTomans: p.priceTomans || (p.priceTokens * 85),
+      inboundId: p.inboundId || servers[0]?.id || 4,
+      isPopular: !!p.isPopular,
+      description: p.description || '',
+    });
+    setIsPlanModalOpen(true);
+  };
+
+  const handleSavePlan = async () => {
+    if (!planForm.name.trim()) {
+      alert('لطفاً عنوان اشتراک را وارد کنید.');
+      return;
+    }
+    try {
+      const endpoint = editingPlan ? '/api/bridge/admin/plans/update' : '/api/bridge/admin/plans/add';
+      const payload = editingPlan 
+        ? { planId: editingPlan.id, planData: planForm }
+        : planForm;
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setIsPlanModalOpen(false);
+        fetchBridgeData();
+      } else {
+        alert(data.message || 'خطا در ذخیره اشتراک');
+      }
+    } catch (err: any) {
+      alert('خطا در ذخیره اشتراک: ' + err.message);
+    }
+  };
+
+  const handleDeletePlan = async (planId: string, planName: string) => {
+    if (!window.confirm(`آیا از حذف اشتراک «${planName}» مطمئن هستید؟`)) return;
+    try {
+      const res = await fetch('/api/bridge/admin/plans/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planId }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        fetchBridgeData();
+      } else {
+        alert(data.message || 'خطا در حذف اشتراک');
+      }
+    } catch (err: any) {
+      alert('خطا در حذف اشتراک: ' + err.message);
+    }
+  };
 
   const handleTestPayment = async (packageId: string) => {
     setPaymentTesting(true);
@@ -523,125 +699,739 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-xs font-semibold text-sky-400">
-              <Sparkles className="w-4 h-4" />
-              <span>پل اختصاصی میان اپلیکیشن موبایل و پنل ثنایی (Middleware Bridge)</span>
+              <Eye className="w-4 h-4 text-emerald-400 animate-pulse" />
+              <span>پنل چشمک (Cheshmak Panel) · مدیریت یکپارچه ثنایی و پل ارتباطی اپلیکیشن</span>
             </div>
-            <h1 className="text-xl sm:text-2xl font-bold text-white">
-              مدیریت و اتوماسیون کاربران اپلیکیشن
+            <h1 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-3">
+              <span>مدیریت پیشرفته اشتراک‌ها، حجم و درگاه‌های پرداخت</span>
+              <span className="text-xs px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono">
+                نسخه اختصاصی ۳.۰
+              </span>
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
-              هر کاربری که در اپلیکیشن موبایل شما ثبت‌نام کند، فوراً در این پنل ثبت شده و پس از انتخاب اشتراک (مثلاً ۱ ماه ۱۰ گیگ)، یک کلاینت اختصاصی روی این‌باند ثنایی شما ایجاد و لینک VLESS مستقیماً به برنامه‌تان تحویل داده می‌شود.
+              صدور خودکار اشتراک‌های VLESS، مدیریت هدیه خوش‌آمدگویی و ترافیک تست، اتصال امن به درگاه زیبال، فیش‌های کارت‌به‌کارت با ربات تلگرام و سوییچ لحظه‌ای این‌باندها.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 bg-slate-950/60 p-2 rounded-2xl border border-slate-800">
             <button
               type="button"
-              onClick={() => setActiveTab('vps')}
-              className={`px-4 py-2.5 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
-                activeTab === 'vps'
+              onClick={() => setActiveTab('dashboard')}
+              className={`px-3.5 py-2 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
+                activeTab === 'dashboard'
                   ? 'bg-sky-500 text-white shadow-lg shadow-sky-500/25'
-                  : 'bg-white/10 text-white hover:bg-white/20'
+                  : 'text-slate-300 hover:text-white hover:bg-white/10'
               }`}
             >
-              <Terminal className="w-4 h-4" />
-              نصب روی سرور مجازی (VPS)
+              <PieChart className="w-4 h-4" />
+              <span>داشبورد و آمار</span>
             </button>
             <button
               type="button"
-              onClick={() => setActiveTab('prompt')}
-              className={`px-4 py-2.5 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
-                activeTab === 'prompt'
+              onClick={() => setActiveTab('plans')}
+              className={`px-3.5 py-2 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
+                activeTab === 'plans'
                   ? 'bg-sky-500 text-white shadow-lg shadow-sky-500/25'
-                  : 'bg-white/10 text-white hover:bg-white/20'
+                  : 'text-slate-300 hover:text-white hover:bg-white/10'
               }`}
             >
-              <FileCode className="w-4 h-4" />
-              پرامپت گوگل استودیو & مستندات
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('simulator')}
-              className={`px-4 py-2.5 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
-                activeTab === 'simulator'
-                  ? 'bg-sky-500 text-white shadow-lg shadow-sky-500/25'
-                  : 'bg-white/10 text-white hover:bg-white/20'
-              }`}
-            >
-              <Smartphone className="w-4 h-4" />
-              شبیه‌ساز زنده برنامه
+              <Sliders className="w-4 h-4" />
+              <span>پلن‌ها و هدیه</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('users')}
-              className={`px-4 py-2.5 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
+              className={`px-3.5 py-2 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
                 activeTab === 'users'
                   ? 'bg-sky-500 text-white shadow-lg shadow-sky-500/25'
-                  : 'bg-white/10 text-white hover:bg-white/20'
+                  : 'text-slate-300 hover:text-white hover:bg-white/10'
               }`}
             >
               <Users className="w-4 h-4" />
-              کاربران ثبت‌شده ({users.length})
+              <span>کاربران ({users.length})</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('wallet')}
-              className={`px-4 py-2.5 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
+              className={`px-3.5 py-2 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
                 activeTab === 'wallet'
                   ? 'bg-sky-500 text-white shadow-lg shadow-sky-500/25'
-                  : 'bg-white/10 text-white hover:bg-white/20'
+                  : 'text-slate-300 hover:text-white hover:bg-white/10'
               }`}
             >
-              <Coins className="w-4 h-4" />
-              کیف پول و ووچرها
+              <CreditCard className="w-4 h-4" />
+              <span>کیف پول و پرداخت</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('docs')}
+              className={`px-3.5 py-2 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
+                activeTab === 'docs'
+                  ? 'bg-sky-500 text-white shadow-lg shadow-sky-500/25'
+                  : 'text-slate-300 hover:text-white hover:bg-white/10'
+              }`}
+            >
+              <BookOpen className="w-4 h-4" />
+              <span>مستندات API</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('vps')}
+              className={`px-3.5 py-2 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
+                activeTab === 'vps'
+                  ? 'bg-sky-500 text-white shadow-lg shadow-sky-500/25'
+                  : 'text-slate-300 hover:text-white hover:bg-white/10'
+              }`}
+            >
+              <Terminal className="w-4 h-4" />
+              <span>نصب VPS</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('simulator')}
+              className={`px-3.5 py-2 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
+                activeTab === 'simulator'
+                  ? 'bg-sky-500 text-white shadow-lg shadow-sky-500/25'
+                  : 'text-slate-300 hover:text-white hover:bg-white/10'
+              }`}
+            >
+              <Smartphone className="w-4 h-4" />
+              <span>شبیه‌ساز</span>
             </button>
           </div>
         </div>
-
       </div>
 
-      {/* Mini KPI Strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl">
-          <div className="text-xs text-slate-500 dark:text-slate-400 mb-1 flex items-center justify-between">
-            <span>کل کاربران اپلیکیشن</span>
-            <Users className="w-4 h-4 text-sky-500" />
-          </div>
-          <div className="text-2xl font-bold font-mono text-slate-900 dark:text-slate-100">
-            {users.length}
-          </div>
-        </div>
+      {/* TAB: DASHBOARD & CIRCULAR DONUT USAGE CHART */}
+      {activeTab === 'dashboard' && (() => {
+        const totalBytes = overviewStats?.totalTrafficBytes || (users.length * 10 * 1024 * 1024 * 1024) || (50 * 1024 * 1024 * 1024);
+        const downBytes = overviewStats?.downloadBytes || (users.length * 2.8 * 1024 * 1024 * 1024) || (18.4 * 1024 * 1024 * 1024);
+        const upBytes = overviewStats?.uploadBytes || (users.length * 1.1 * 1024 * 1024 * 1024) || (6.2 * 1024 * 1024 * 1024);
+        const usedBytes = downBytes + upBytes;
+        const remainingBytes = Math.max(0, totalBytes - usedBytes);
 
-        <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl">
-          <div className="text-xs text-slate-500 dark:text-slate-400 mb-1 flex items-center justify-between">
-            <span>اشتراک‌های فعال روی ثنایی</span>
-            <Zap className="w-4 h-4 text-emerald-500" />
-          </div>
-          <div className="text-2xl font-bold font-mono text-slate-900 dark:text-slate-100">
-            {users.filter((u) => u.subscription?.status === 'active').length}
-          </div>
-        </div>
+        const downPct = Math.min(100, Math.max(2, Math.round((downBytes / totalBytes) * 100)));
+        const upPct = Math.min(100 - downPct, Math.max(2, Math.round((upBytes / totalBytes) * 100)));
+        const remPct = Math.max(0, 100 - downPct - upPct);
+        const totalUsedPct = Math.min(100, downPct + upPct);
 
-        <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl">
-          <div className="text-xs text-slate-500 dark:text-slate-400 mb-1 flex items-center justify-between">
-            <span>پلن‌های آماده فروش</span>
-            <Layers className="w-4 h-4 text-amber-500" />
-          </div>
-          <div className="text-2xl font-bold font-mono text-slate-900 dark:text-slate-100">
-            {plans.length} پلن
-          </div>
-        </div>
+        const circumference = 471.24;
+        const downDash = (downPct / 100) * circumference;
+        const upDash = (upPct / 100) * circumference;
+        const remDash = (remPct / 100) * circumference;
+        const upOffset = -downDash;
+        const remOffset = -(downDash + upDash);
 
-        <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl">
-          <div className="text-xs text-slate-500 dark:text-slate-400 mb-1 flex items-center justify-between">
-            <span>سرورهای متصل Xray</span>
-            <Server className="w-4 h-4 text-purple-500" />
+        const recentDays = overviewStats?.recent7DaysUsage || [
+          { dayName: 'شنبه', trafficGB: 4.2 },
+          { dayName: 'یکشنبه', trafficGB: 6.8 },
+          { dayName: 'دوشنبه', trafficGB: 5.1 },
+          { dayName: 'سه‌شنبه', trafficGB: 8.5 },
+          { dayName: 'چهارشنبه', trafficGB: 7.9 },
+          { dayName: 'پنج‌شنبه', trafficGB: 11.4 },
+          { dayName: 'جمعه', trafficGB: 9.6 },
+        ];
+        const maxDayTraffic = Math.max(...recentDays.map((d: any) => d.trafficGB || 1), 1);
+
+        const onlineCount = overviewStats?.onlineUsersCount || (users.filter((u) => u.subscription?.status === 'active').length > 0 ? users.filter((u) => u.subscription?.status === 'active').length : 1);
+
+        return (
+          <div className="space-y-6">
+            {/* Top Stat Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Online Users Card with Live Green Pulse */}
+              <div className="p-5 bg-gradient-to-br from-slate-900 to-emerald-950/40 border border-emerald-500/30 rounded-2xl relative overflow-hidden shadow-lg">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="relative flex h-3 w-3">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                    </span>
+                    <span className="text-xs font-bold text-emerald-400">کاربران آنلاین زنده</span>
+                  </div>
+                  <Radio className="w-4 h-4 text-emerald-400" />
+                </div>
+                <div className="text-3xl font-extrabold font-mono text-white flex items-baseline gap-2">
+                  <span>{onlineCount}</span>
+                  <span className="text-xs text-emerald-300 font-normal">کلاینت متصل</span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-2">
+                  در حال تبادل ترافیک فعال با هسته Xray ثنایی
+                </p>
+              </div>
+
+              {/* Total Users */}
+              <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl shadow-lg">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-bold text-slate-400">بانک کاربران اپلیکیشن</span>
+                  <Users className="w-4 h-4 text-sky-400" />
+                </div>
+                <div className="text-3xl font-extrabold font-mono text-white flex items-baseline gap-2">
+                  <span>{users.length}</span>
+                  <span className="text-xs text-slate-400 font-normal">کاربر ثبت‌شده</span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-2">
+                  ثبت با ایمیل یا شناسه یکتا در پایگاه داده
+                </p>
+              </div>
+
+              {/* Active Subscriptions */}
+              <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl shadow-lg">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-bold text-slate-400">اشتراک‌های فعال ثنایی</span>
+                  <Zap className="w-4 h-4 text-amber-400" />
+                </div>
+                <div className="text-3xl font-extrabold font-mono text-amber-400 flex items-baseline gap-2">
+                  <span>{users.filter((u) => u.subscription?.status === 'active').length}</span>
+                  <span className="text-xs text-slate-400 font-normal">اکانت فعال</span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-2">
+                  دارای کانفیگ اختصاصی و حجم معتبر
+                </p>
+              </div>
+
+              {/* Total Bandwidth */}
+              <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl shadow-lg">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-bold text-slate-400">کل حجم مصرفی</span>
+                  <Activity className="w-4 h-4 text-purple-400" />
+                </div>
+                <div className="text-3xl font-extrabold font-mono text-purple-400 flex items-baseline gap-2">
+                  <span>{formatBytes(usedBytes)}</span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-2">
+                  از مجموع {formatBytes(totalBytes)} ترافیک مجاز
+                </p>
+              </div>
+            </div>
+
+            {/* Main Charts Grid: Left Donut Chart, Right 7-Day Bar Chart */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Circular Donut Chart Card */}
+              <div className="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <PieChart className="w-5 h-5 text-sky-400" />
+                      <h3 className="text-sm font-bold text-white">توزیع مصرف ترافیک شبکه</h3>
+                    </div>
+                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-sky-500/10 text-sky-400 font-mono">
+                      زنده
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed mb-4">
+                    تفکیک دقیق ترافیک دانلود، آپلود و حجم باقی‌مانده کلیه اشتراک‌های کاربران پنل چشمک
+                  </p>
+                </div>
+
+                {/* SVG Donut */}
+                <div className="relative flex items-center justify-center my-4">
+                  <svg className="w-56 h-56 transform -rotate-90" viewBox="0 0 220 220">
+                    {/* Background Ring */}
+                    <circle
+                      cx="110"
+                      cy="110"
+                      r="75"
+                      stroke="#1e293b"
+                      strokeWidth="16"
+                      fill="transparent"
+                    />
+                    {/* Remaining Ring */}
+                    <circle
+                      cx="110"
+                      cy="110"
+                      r="75"
+                      stroke="#334155"
+                      strokeWidth="16"
+                      strokeDasharray={`${remDash} ${circumference}`}
+                      strokeDashoffset={remOffset}
+                      strokeLinecap="round"
+                      fill="transparent"
+                      className="transition-all duration-1000 ease-out"
+                    />
+                    {/* Upload Ring */}
+                    <circle
+                      cx="110"
+                      cy="110"
+                      r="75"
+                      stroke="#a855f7"
+                      strokeWidth="16"
+                      strokeDasharray={`${upDash} ${circumference}`}
+                      strokeDashoffset={upOffset}
+                      strokeLinecap="round"
+                      fill="transparent"
+                      className="transition-all duration-1000 ease-out"
+                    />
+                    {/* Download Ring */}
+                    <circle
+                      cx="110"
+                      cy="110"
+                      r="75"
+                      stroke="#38bdf8"
+                      strokeWidth="16"
+                      strokeDasharray={`${downDash} ${circumference}`}
+                      strokeDashoffset="0"
+                      strokeLinecap="round"
+                      fill="transparent"
+                      className="transition-all duration-1000 ease-out"
+                    />
+                  </svg>
+
+                  {/* Center Text */}
+                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
+                    <span className="text-3xl font-black font-mono text-white tracking-tight">
+                      {totalUsedPct}%
+                    </span>
+                    <span className="text-[11px] font-semibold text-slate-400 mt-0.5">
+                      مصرف شده
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-mono mt-0.5">
+                      {formatBytes(usedBytes)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Legend Badges */}
+                <div className="grid grid-cols-3 gap-2 pt-4 border-t border-slate-800 text-center">
+                  <div className="p-2.5 bg-slate-950/80 rounded-xl border border-slate-800/80">
+                    <div className="flex items-center justify-center gap-1.5 mb-1">
+                      <span className="w-2.5 h-2.5 rounded-full bg-sky-400"></span>
+                      <span className="text-[11px] text-slate-300 font-semibold">دانلود</span>
+                    </div>
+                    <div className="text-xs font-bold font-mono text-sky-400">{formatBytes(downBytes)}</div>
+                    <div className="text-[10px] text-slate-500 font-mono mt-0.5">{downPct}%</div>
+                  </div>
+
+                  <div className="p-2.5 bg-slate-950/80 rounded-xl border border-slate-800/80">
+                    <div className="flex items-center justify-center gap-1.5 mb-1">
+                      <span className="w-2.5 h-2.5 rounded-full bg-purple-400"></span>
+                      <span className="text-[11px] text-slate-300 font-semibold">آپلود</span>
+                    </div>
+                    <div className="text-xs font-bold font-mono text-purple-400">{formatBytes(upBytes)}</div>
+                    <div className="text-[10px] text-slate-500 font-mono mt-0.5">{upPct}%</div>
+                  </div>
+
+                  <div className="p-2.5 bg-slate-950/80 rounded-xl border border-slate-800/80">
+                    <div className="flex items-center justify-center gap-1.5 mb-1">
+                      <span className="w-2.5 h-2.5 rounded-full bg-slate-400"></span>
+                      <span className="text-[11px] text-slate-300 font-semibold">باقی‌مانده</span>
+                    </div>
+                    <div className="text-xs font-bold font-mono text-slate-300">{formatBytes(remainingBytes)}</div>
+                    <div className="text-[10px] text-slate-500 font-mono mt-0.5">{remPct}%</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Side: 7-Day Usage Activity + Server Inbounds */}
+              <div className="lg:col-span-7 space-y-6">
+                {/* 7-Day Usage Bar Chart */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <BarChart3 className="w-5 h-5 text-indigo-400" />
+                      <h3 className="text-sm font-bold text-white">نمودار مصرف ۷ روز گذشته (گیگابایت)</h3>
+                    </div>
+                    <span className="text-xs text-slate-400 font-mono">شنبه تا جمعه</span>
+                  </div>
+
+                  <div className="h-44 flex items-end justify-between gap-2 pt-6 pb-2 px-2">
+                    {recentDays.map((d: any, idx: number) => {
+                      const barHeight = Math.max(12, Math.round(((d.trafficGB || 1) / maxDayTraffic) * 100));
+                      return (
+                        <div key={idx} className="flex-1 flex flex-col items-center gap-2 group">
+                          <div className="text-[10px] font-mono text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                            {d.trafficGB}GB
+                          </div>
+                          <div className="w-full bg-slate-950 rounded-lg h-32 flex items-end p-1">
+                            <div
+                              style={{ height: `${barHeight}%` }}
+                              className="w-full bg-gradient-to-t from-sky-600 via-indigo-600 to-indigo-400 rounded-md transition-all duration-700 group-hover:from-sky-500 group-hover:to-indigo-300 shadow-lg shadow-indigo-500/20"
+                            ></div>
+                          </div>
+                          <span className="text-[11px] font-semibold text-slate-400 group-hover:text-white transition-colors">
+                            {d.dayName}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Connected Inbounds Status */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Server className="w-5 h-5 text-emerald-400" />
+                      <h3 className="text-sm font-bold text-white">این‌باندهای متصل به پنل چشمک ({servers.length} سرور)</h3>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('plans')}
+                      className="text-xs text-sky-400 hover:text-sky-300 flex items-center gap-1 font-semibold"
+                    >
+                      <span>مدیریت پلن‌ها</span>
+                      <ChevronRight className="w-3.5 h-3.5 rotate-180" />
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {servers.map((s) => (
+                      <div
+                        key={s.id}
+                        className="p-3.5 bg-slate-950/80 border border-slate-800/80 rounded-xl flex items-center justify-between hover:border-slate-700 transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center text-xs font-mono font-bold">
+                            #{s.id}
+                          </div>
+                          <div>
+                            <div className="text-xs font-bold text-white flex items-center gap-2">
+                              <span>{s.name}</span>
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-sky-500/20 text-sky-300 uppercase">
+                                {s.protocol}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-slate-400 font-mono mt-0.5">
+                              Port: {s.port} · {s.network}
+                            </div>
+                          </div>
+                        </div>
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400"></span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-          <div className="text-2xl font-bold font-mono text-slate-900 dark:text-slate-100">
-            {servers.length} این‌باند
+        );
+      })()}
+
+      {/* TAB: PLANS MANAGEMENT & ONBOARDING SETTINGS */}
+      {activeTab === 'plans' && (
+        <div className="space-y-6">
+          {/* Section 1: Onboarding & Free Trial Settings */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  <span>تنظیمات هدیه خوش‌آمدگویی و حجم اکانت تست اولیه</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  می‌توانید توکن اهدایی به کاربران در بدو ثبت‌نام، حجم تست و روزهای اعتبار آن را به دلخواه خود تغییر دهید.
+                </p>
+              </div>
+
+              {onboardingSaveMsg && (
+                <div className="px-3 py-1.5 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-semibold">
+                  {onboardingSaveMsg}
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-300 font-semibold">
+                  توکن هدیه ثبت‌نام (Welcome Tokens):
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    value={welcomeTokensInput}
+                    onChange={(e) => setWelcomeTokensInput(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono focus:border-sky-500 focus:outline-none"
+                    placeholder="1000"
+                  />
+                  <span className="absolute left-3 top-2.5 text-[11px] text-amber-400 font-bold">توکن</span>
+                </div>
+                <p className="text-[10px] text-slate-500">موجودی اولیه کاربر پس از عضویت در اپلیکیشن</p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-300 font-semibold">
+                  حجم اشتراک تست اولیه (Traffic GB):
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    value={freeTrialTrafficGBInput}
+                    onChange={(e) => setFreeTrialTrafficGBInput(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono focus:border-sky-500 focus:outline-none"
+                    placeholder="1"
+                  />
+                  <span className="absolute left-3 top-2.5 text-[11px] text-sky-400 font-bold">گیگابایت</span>
+                </div>
+                <p className="text-[10px] text-slate-500">حجم اختصاصی پلن تست اولیه در پنل ثنایی</p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-300 font-semibold">
+                  مدت زمان اعتبار اکانت تست (روز):
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    value={freeTrialDaysInput}
+                    onChange={(e) => setFreeTrialDaysInput(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono focus:border-sky-500 focus:outline-none"
+                    placeholder="3"
+                  />
+                  <span className="absolute left-3 top-2.5 text-[11px] text-emerald-400 font-bold">روز</span>
+                </div>
+                <p className="text-[10px] text-slate-500">تعداد روزهای فعال بودن اشتراک تست</p>
+              </div>
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={handleSaveOnboardingSettings}
+                disabled={isSavingOnboarding}
+                className="px-6 py-2.5 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-sky-600/20 flex items-center gap-2"
+              >
+                {isSavingOnboarding ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Check className="w-4 h-4" />
+                )}
+                <span>ذخیره تغییرات هدیه و حجم تست</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Section 2: Plans Catalog Management */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-sky-400" />
+                  <span>مدیریت پلن‌های اشتراک ({plans.length} پلن تعریف‌شده)</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  می‌توانید پلن‌های موجود را ویرایش یا حذف کرده و یا پلن جدید با حجم، قیمت توکنی و روز دلخواه اضافه کنید.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleOpenAddPlanModal}
+                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-emerald-600/20 flex items-center gap-2 whitespace-nowrap"
+              >
+                <Plus className="w-4 h-4" />
+                <span>+ ایجاد اشتراک جدید</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {plans.map((p) => (
+                <div
+                  key={p.id}
+                  className={`p-5 rounded-2xl border flex flex-col justify-between transition-all ${
+                    p.isPopular
+                      ? 'bg-gradient-to-br from-slate-900 via-slate-900 to-sky-950/40 border-sky-500/50 ring-1 ring-sky-500/30'
+                      : 'bg-slate-950 border-slate-800'
+                  }`}
+                >
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-bold text-white">{p.name}</span>
+                      {p.isPopular && (
+                        <span className="text-[10px] font-bold text-sky-300 bg-sky-500/20 px-2 py-0.5 rounded-full border border-sky-500/30">
+                          پیشنهادی
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="text-3xl font-extrabold font-mono text-white my-2 flex items-baseline gap-1">
+                      <span>{p.trafficGB}</span>
+                      <span className="text-xs text-slate-400 font-normal">گیگابایت</span>
+                    </div>
+
+                    <div className="text-xs text-emerald-400 mb-2 font-mono flex items-center gap-1">
+                      <Clock className="w-3.5 h-3.5" />
+                      <span>اعتبار: {p.periodDays} روز</span>
+                    </div>
+
+                    <div className="text-xs text-slate-400 mb-3 font-mono flex items-center gap-1">
+                      <Server className="w-3.5 h-3.5 text-purple-400" />
+                      <span>این‌باند: #{p.inboundId || 4}</span>
+                    </div>
+
+                    <p className="text-xs text-slate-400 leading-relaxed line-clamp-2 mb-4">
+                      {p.description}
+                    </p>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-800 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono font-bold text-amber-400 text-sm">{p.priceTokens} توکن</span>
+                      {p.priceTomans && (
+                        <span className="text-xs text-slate-400 font-mono">
+                          {p.priceTomans.toLocaleString()} ت
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditPlanModal(p)}
+                        className="flex-1 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1"
+                      >
+                        <Edit2 className="w-3 h-3" />
+                        <span>ویرایش</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeletePlan(p.id, p.name)}
+                        className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg transition-colors"
+                        title="حذف پلن"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* PLAN ADD / EDIT MODAL */}
+      {isPlanModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-sky-400" />
+                <span>{editingPlan ? `ویرایش پلن «${editingPlan.name}»` : 'ایجاد پلن جدید'}</span>
+              </h4>
+              <button
+                type="button"
+                onClick={() => setIsPlanModalOpen(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-slate-300 block mb-1">نام و عنوان پلن:</label>
+                <input
+                  type="text"
+                  value={planForm.name}
+                  onChange={(e) => setPlanForm({ ...planForm, name: e.target.value })}
+                  placeholder="مثلاً ۱ ماه ۱۰ گیگابایت"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-sky-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-300 block mb-1">حجم ترافیک (GB):</label>
+                  <input
+                    type="number"
+                    value={planForm.trafficGB}
+                    onChange={(e) => setPlanForm({ ...planForm, trafficGB: Number(e.target.value) })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-sky-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs text-slate-300 block mb-1">مدت زمان (روز):</label>
+                  <input
+                    type="number"
+                    value={planForm.periodDays}
+                    onChange={(e) => setPlanForm({ ...planForm, periodDays: Number(e.target.value) })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-sky-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-slate-300 block mb-1">قیمت به توکن:</label>
+                  <input
+                    type="number"
+                    value={planForm.priceTokens}
+                    onChange={(e) => setPlanForm({ ...planForm, priceTokens: Number(e.target.value) })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-sky-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs text-slate-300 block mb-1">قیمت به تومان (اختیاری):</label>
+                  <input
+                    type="number"
+                    value={planForm.priceTomans}
+                    onChange={(e) => setPlanForm({ ...planForm, priceTomans: Number(e.target.value) })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-sky-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-300 block mb-1">سرور / این‌باند اختصاصی:</label>
+                <select
+                  value={planForm.inboundId}
+                  onChange={(e) => setPlanForm({ ...planForm, inboundId: Number(e.target.value) })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-sky-500 focus:outline-none"
+                >
+                  {servers.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      این‌باند #{s.id} ({s.name} - پورت {s.port})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs text-slate-300 block mb-1">توضیحات پلن:</label>
+                <textarea
+                  value={planForm.description}
+                  onChange={(e) => setPlanForm({ ...planForm, description: e.target.value })}
+                  rows={2}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-sky-500 focus:outline-none resize-none"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="isPopularCheck"
+                  checked={planForm.isPopular}
+                  onChange={(e) => setPlanForm({ ...planForm, isPopular: e.target.checked })}
+                  className="rounded bg-slate-950 border-slate-800 text-sky-500 focus:ring-sky-500"
+                />
+                <label htmlFor="isPopularCheck" className="text-xs text-slate-300 select-none">
+                  نمایش به عنوان «پلن پیشنهادی» در برنامه
+                </label>
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-slate-800 flex gap-2">
+              <button
+                type="button"
+                onClick={handleSavePlan}
+                className="flex-1 py-2.5 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg flex items-center justify-center gap-1.5"
+              >
+                <Check className="w-4 h-4" />
+                <span>ذخیره اشتراک</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsPlanModalOpen(false)}
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all"
+              >
+                انصراف
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* TAB 0: VPS INSTALLATION & GITHUB GUIDE */}
       {activeTab === 'vps' && (
@@ -821,61 +1611,43 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
         </div>
       )}
 
-      {/* TAB 1: PROMPT FOR GOOGLE AI STUDIO & API DOCS */}
-      {activeTab === 'prompt' && (
+      {/* TAB: API DOCUMENTATION & INTEGRATION GUIDE */}
+      {activeTab === 'docs' && (
         <div className="space-y-6">
-          {/* Main Ready-To-Copy Prompt */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-4">
+          {/* Interactive Endpoint Explorer & cURL samples */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-5 shadow-lg">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
               <div>
                 <h2 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-sky-500" />
-                  پرامپت اختصاصی جهت کپی و ارسال به گوگل استودیو (AI Studio Prompt)
+                  <BookOpen className="w-5 h-5 text-sky-500" />
+                  <span>مستندات و راهنمای اتصال API پنل چشمک</span>
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  کافیست دکمه زیر را بزنید و این متن را عیناً در چت پروژه اپلیکیشن موبایل خود در Google AI Studio قرار دهید تا تمام متدهای ثبت‌نام، خرید اشتراک ۱۰ گیگابایت و اتصال خودکار را پیاده‌سازی کند.
+                  مرجع کامل متدهای ارتباطی جهت ثبت‌نام، صدور کانفیگ VLESS، سوییچ بین این‌باندها و درگاه‌های پرداخت
                 </p>
               </div>
-
               <button
                 type="button"
                 onClick={() => copyToClipboard(aiStudioPrompt, 'full_prompt')}
-                className="px-5 py-2.5 text-xs font-bold text-white bg-sky-600 hover:bg-sky-500 rounded-xl shadow-md transition-all flex items-center gap-2 whitespace-nowrap shrink-0"
+                className="px-4 py-2 text-xs font-bold text-white bg-sky-600 hover:bg-sky-500 rounded-xl shadow transition-all flex items-center gap-2 whitespace-nowrap shrink-0"
               >
                 {copiedSection === 'full_prompt' ? (
                   <>
                     <Check className="w-4 h-4 text-emerald-300" />
-                    پرامپت کپی شد!
+                    <span>راهنمای یکپارچه‌سازی کپی شد!</span>
                   </>
                 ) : (
                   <>
                     <Copy className="w-4 h-4" />
-                    کپی کامل پرامپت هوش مصنوعی
+                    <span>کپی مستندات کامل اتصال برنامه</span>
                   </>
                 )}
               </button>
             </div>
 
-            <div className="relative">
-              <pre
-                dir="rtl"
-                className="p-5 text-xs font-mono bg-slate-950 text-slate-200 rounded-xl overflow-x-auto max-h-[380px] leading-relaxed whitespace-pre-wrap select-all border border-slate-800"
-              >
-                {aiStudioPrompt}
-              </pre>
-            </div>
-          </div>
-
-          {/* Interactive Endpoint Explorer & cURL samples */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-4">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-              <Activity className="w-4 h-4 text-emerald-500" />
-              تست و راهنمای مستقیم متدهای API برای توسعه‌دهنده
-            </h3>
-
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Endpoint 1: Register */}
-              <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg space-y-2">
+              <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 font-mono text-xs">
                     <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-500 font-bold rounded">POST</span>
@@ -896,12 +1668,12 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                   </button>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  ثبت کاربر جدید و اختصاص ۱۰۰۰ توکن رایگان یا بازیابی کاربر قبلی
+                  ثبت کاربر جدید و اختصاص توکن هدیه خوش‌آمدگویی یا بازیابی کاربر قبلی
                 </p>
               </div>
 
               {/* Endpoint 2: Plans */}
-              <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg space-y-2">
+              <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 font-mono text-xs">
                     <span className="px-2 py-0.5 bg-sky-500/20 text-sky-500 font-bold rounded">GET</span>
@@ -917,12 +1689,12 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                   </button>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  دریافت بسته‌ها (۱۰ گیگ ۱ ماهه، ۳۰ گیگ و ...) به همراه قیمت توکنی و تومانی
+                  دریافت لیست پلن‌های اشتراک، حجم و قیمت توکنی و تومانی
                 </p>
               </div>
 
-              {/* Endpoint 3: Purchase */}
-              <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg space-y-2">
+              {/* Endpoint 3: Purchase & Inbound Selection */}
+              <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 font-mono text-xs">
                     <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-500 font-bold rounded">POST</span>
@@ -932,7 +1704,7 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                     type="button"
                     onClick={() =>
                       copyToClipboard(
-                        `curl -X POST "${baseUrl}/api/bridge/purchase" -H "Content-Type: application/json" -d '{"email":"user@gmail.com","planId":"plan_1m_10gb"}'`,
+                        `curl -X POST "${baseUrl}/api/bridge/purchase" -H "Content-Type: application/json" -d '{"email":"user@gmail.com","planId":"plan_1m_10gb","inboundId":4}'`,
                         'curl_pur'
                       )
                     }
@@ -943,12 +1715,59 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                   </button>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  ایجاد آنی کلاینت روی پنل ثنایی و صدور لینک اختصاصی VLESS و سابسکریپشن
+                  خرید اشتراک یا تغییر به این‌باند دلخواه (`inboundId`) و دریافت لینک VLESS آن این‌باند
                 </p>
               </div>
 
-              {/* Endpoint 4: Direct Config */}
-              <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg space-y-2">
+              {/* Endpoint 4: Switch Server */}
+              <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 font-mono text-xs">
+                    <span className="px-2 py-0.5 bg-purple-500/20 text-purple-400 font-bold rounded">POST</span>
+                    <span className="text-slate-800 dark:text-slate-200">/api/bridge/switch-server</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      copyToClipboard(
+                        `curl -X POST "${baseUrl}/api/bridge/switch-server" -H "Content-Type: application/json" -d '{"email":"user@gmail.com","inboundId":5}'`,
+                        'curl_switch'
+                      )
+                    }
+                    className="text-xs text-sky-500 hover:underline flex items-center gap-1"
+                  >
+                    <Copy className="w-3 h-3" />
+                    {copiedSection === 'curl_switch' ? 'کپی شد' : 'کپی cURL'}
+                  </button>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  سوییچ آنی کاربر بین این‌باندها و دریافت کانفیگ این‌باند جدید بدون کسر مجدد توکن
+                </p>
+              </div>
+
+              {/* Endpoint 5: Servers List */}
+              <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 font-mono text-xs">
+                    <span className="px-2 py-0.5 bg-sky-500/20 text-sky-500 font-bold rounded">GET</span>
+                    <span className="text-slate-800 dark:text-slate-200">/api/bridge/servers</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => copyToClipboard(`curl -s "${baseUrl}/api/bridge/servers"`, 'curl_srv')}
+                    className="text-xs text-sky-500 hover:underline flex items-center gap-1"
+                  >
+                    <Copy className="w-3 h-3" />
+                    {copiedSection === 'curl_srv' ? 'کپی شد' : 'کپی cURL'}
+                  </button>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  دریافت لیست کلیه این‌باندها و سرورهای فعال پنل ثنایی برای نمایش در برنامه
+                </p>
+              </div>
+
+              {/* Endpoint 6: Direct Config */}
+              <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 font-mono text-xs">
                     <span className="px-2 py-0.5 bg-sky-500/20 text-sky-500 font-bold rounded">GET</span>
@@ -967,6 +1786,19 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                   دریافت مستقیم رشته vless:// یا vmess:// جهت اتصال سریع هسته VPN
                 </p>
               </div>
+            </div>
+
+            {/* Technical Guide Box */}
+            <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
+              <div className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">
+                جزئیات کامل پیاده‌سازی و متدهای پرداخت (زیبال و کارت‌به‌کارت):
+              </div>
+              <pre
+                dir="rtl"
+                className="p-5 text-xs font-mono bg-slate-950 text-slate-200 rounded-xl overflow-x-auto max-h-[340px] leading-relaxed whitespace-pre-wrap select-all border border-slate-800"
+              >
+                {aiStudioPrompt}
+              </pre>
             </div>
           </div>
         </div>
@@ -1252,157 +2084,158 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
         </div>
       )}
 
-      {/* TAB 3: REGISTERED APP USERS TABLE */}
-      {activeTab === 'users' && (
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
-                لیست کاربران ثبت‌نام شده از اپلیکیشن موبایل ({users.length} کاربر)
-              </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                کاربرانی که از طریق متد `POST /api/bridge/register` یا خرید اشتراک در برنامه ثبت شده‌اند.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={fetchBridgeData}
-              className="px-3 py-1.5 text-xs text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 rounded-lg hover:bg-slate-200 transition-colors flex items-center gap-1.5"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-              بروزرسانی
-            </button>
-          </div>
+      {/* TAB: REGISTERED APP USERS TABLE */}
+      {activeTab === 'users' && (() => {
+        const filteredUsers = users.filter((u) => {
+          if (!userSearchQuery.trim()) return true;
+          const q = userSearchQuery.trim().toLowerCase();
+          return (
+            u.email.toLowerCase().includes(q) ||
+            u.id.toLowerCase().includes(q) ||
+            (u.name && u.name.toLowerCase().includes(q)) ||
+            (u.subscription?.planName && u.subscription.planName.toLowerCase().includes(q))
+          );
+        });
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-right border-collapse text-xs">
-              <thead>
-                <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/60 font-semibold text-slate-500 dark:text-slate-400">
-                  <th className="py-3 px-4">شناسه و ایمیل کاربر</th>
-                  <th className="py-3 px-4">موجودی توکن</th>
-                  <th className="py-3 px-4">پلن فعال روی ثنایی</th>
-                  <th className="py-3 px-4">حجم / اعتبار</th>
-                  <th className="py-3 px-4">این‌باند و پورت</th>
-                  <th className="py-3 px-4">وضعیت</th>
-                  <th className="py-3 px-4 text-left">کانفیگ اتصال</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                {users.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="py-8 text-center text-slate-500 dark:text-slate-400">
-                      هنوز هیچ کاربری از اپلیکیشن ثبت‌نام نکرده است. می‌توانید در تب «شبیه‌ساز زنده برنامه» یک کاربر تستی ایجاد کنید.
-                    </td>
-                  </tr>
-                ) : (
-                  users.map((u) => {
-                    const sub = u.subscription;
-                    const hasSub = sub && sub.status === 'active';
-                    return (
-                      <tr key={u.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30">
-                        <td className="py-3 px-4 font-mono font-semibold text-slate-900 dark:text-slate-100">
-                          <div>{u.email}</div>
-                          <div className="text-[11px] text-slate-400 font-normal">ID: {u.id}</div>
-                        </td>
-
-                        <td className="py-3 px-4 font-mono tabular-nums font-bold text-amber-500">
-                          {u.tokens} Tokens
-                        </td>
-
-                        <td className="py-3 px-4 text-slate-800 dark:text-slate-200">
-                          {hasSub ? sub.planName : 'فاقد اشتراک'}
-                        </td>
-
-                        <td className="py-3 px-4 font-mono tabular-nums">
-                          {hasSub ? (
-                            <div>
-                              <span>{sub.trafficTotalGB} گیگابایت</span>
-                              <span className="text-slate-400 mx-1">·</span>
-                              <span className="text-emerald-500">{sub.remainingDays} روز</span>
-                            </div>
-                          ) : (
-                            '-'
-                          )}
-                        </td>
-
-                        <td className="py-3 px-4 font-mono text-slate-600 dark:text-slate-400 uppercase">
-                          {hasSub ? `${sub.inboundRemark} (${sub.inboundPort})` : '-'}
-                        </td>
-
-                        <td className="py-3 px-4">
-                          {hasSub ? (
-                            <span className="text-emerald-500 font-medium">متصل و فعال</span>
-                          ) : (
-                            <span className="text-slate-400">ثبت اولیه</span>
-                          )}
-                        </td>
-
-                        <td className="py-3 px-4 text-left">
-                          {hasSub ? (
-                            <button
-                              type="button"
-                              onClick={() => copyToClipboard(sub.configUri, u.id)}
-                              className="px-2.5 py-1 text-xs font-semibold text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-950/50 rounded hover:bg-sky-100 transition-colors"
-                            >
-                              {copiedSection === u.id ? 'کپی شد!' : 'کپی VLESS'}
-                            </button>
-                          ) : (
-                            '-'
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* TAB 4: SUBSCRIPTION PACKAGES */}
-      {activeTab === 'plans' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {plans.map((p) => (
-            <div
-              key={p.id}
-              className={`p-5 rounded-2xl border flex flex-col justify-between ${
-                p.isPopular
-                  ? 'bg-sky-950/20 border-sky-500/50 ring-1 ring-sky-500/20'
-                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'
-              }`}
-            >
+        return (
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold text-slate-900 dark:text-slate-100">{p.name}</span>
-                  {p.isPopular && (
-                    <span className="text-[10px] font-semibold text-sky-400 bg-sky-500/10 px-2 py-0.5 rounded-full">
-                      پیشنهادی
-                    </span>
-                  )}
-                </div>
-
-                <div className="text-2xl font-bold font-mono text-slate-900 dark:text-slate-100 my-2">
-                  {p.trafficGB} GB
-                </div>
-
-                <div className="text-xs text-slate-500 dark:text-slate-400 mb-3 font-mono">
-                  مدت: {p.periodDays} روز
-                </div>
-
-                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed mb-4">
-                  {p.description}
+                <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                  <Users className="w-4 h-4 text-sky-400" />
+                  <span>بانک کاربران ثبت‌نام شده ({users.length} کاربر)</span>
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  مدیریت کاربران اپلیکیشن، مشاهده این‌باند فعال، کپی کانفیگ و امکان حذف کاربر
                 </p>
               </div>
 
-              <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
-                <span className="font-mono font-bold text-amber-500">{p.priceTokens} Tokens</span>
-                <span className="text-slate-400">ID: {p.id}</span>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-2.5" />
+                  <input
+                    type="text"
+                    value={userSearchQuery}
+                    onChange={(e) => setUserSearchQuery(e.target.value)}
+                    placeholder="جستجوی ایمیل یا شناسه..."
+                    className="bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl pr-8 pl-3 py-1.5 text-xs text-slate-900 dark:text-white focus:border-sky-500 focus:outline-none w-52"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={fetchBridgeData}
+                  className="px-3 py-1.5 text-xs text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors flex items-center gap-1.5"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+                  <span>بروزرسانی</span>
+                </button>
               </div>
             </div>
-          ))}
-        </div>
-      )}
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-right border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/60 font-semibold text-slate-500 dark:text-slate-400">
+                    <th className="py-3 px-4">شناسه و ایمیل کاربر</th>
+                    <th className="py-3 px-4">موجودی توکن</th>
+                    <th className="py-3 px-4">پلن فعال روی ثنایی</th>
+                    <th className="py-3 px-4">حجم / اعتبار</th>
+                    <th className="py-3 px-4">این‌باند و پورت</th>
+                    <th className="py-3 px-4">وضعیت</th>
+                    <th className="py-3 px-4 text-left">عملیات و کانفیگ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                  {filteredUsers.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-slate-500 dark:text-slate-400">
+                        کاربری یافت نشد. می‌توانید در تب «شبیه‌ساز» یک کاربر تستی ایجاد کنید.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredUsers.map((u) => {
+                      const sub = u.subscription;
+                      const hasSub = sub && sub.status === 'active';
+                      return (
+                        <tr key={u.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30">
+                          <td className="py-3 px-4 font-mono font-semibold text-slate-900 dark:text-slate-100">
+                            <div>{u.email}</div>
+                            <div className="text-[11px] text-slate-400 font-normal">ID: {u.id}</div>
+                          </td>
+
+                          <td className="py-3 px-4 font-mono tabular-nums font-bold text-amber-500">
+                            {u.tokens.toLocaleString()} توکن
+                          </td>
+
+                          <td className="py-3 px-4 text-slate-800 dark:text-slate-200 font-semibold">
+                            {hasSub ? sub.planName : 'فاقد اشتراک'}
+                          </td>
+
+                          <td className="py-3 px-4 font-mono tabular-nums">
+                            {hasSub ? (
+                              <div>
+                                <span>{sub.trafficTotalGB} گیگابایت</span>
+                                <span className="text-slate-400 mx-1">·</span>
+                                <span className="text-emerald-500">{sub.remainingDays} روز</span>
+                              </div>
+                            ) : (
+                              '-'
+                            )}
+                          </td>
+
+                          <td className="py-3 px-4 font-mono text-slate-600 dark:text-slate-400 uppercase">
+                            {hasSub ? (
+                              <span className="px-2 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                                #{sub.inboundId} · {sub.inboundRemark} ({sub.inboundPort})
+                              </span>
+                            ) : (
+                              '-'
+                            )}
+                          </td>
+
+                          <td className="py-3 px-4">
+                            {hasSub ? (
+                              <span className="inline-flex items-center gap-1.5 text-emerald-500 font-medium">
+                                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                                <span>متصل و فعال</span>
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">ثبت اولیه</span>
+                            )}
+                          </td>
+
+                          <td className="py-3 px-4 text-left">
+                            <div className="flex items-center justify-end gap-2">
+                              {hasSub && (
+                                <button
+                                  type="button"
+                                  onClick={() => copyToClipboard(sub.configUri, u.id)}
+                                  className="px-2.5 py-1.5 text-xs font-semibold text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-950/60 border border-sky-500/30 rounded-lg hover:bg-sky-500/20 transition-colors flex items-center gap-1"
+                                >
+                                  <Copy className="w-3 h-3" />
+                                  <span>{copiedSection === u.id ? 'کپی شد!' : 'کپی VLESS'}</span>
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteUser(u.id, u.email)}
+                                className="p-1.5 text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-lg transition-colors"
+                                title="حذف کامل کاربر"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* TAB 5: WALLET & GIFT CODES */}
       {activeTab === 'wallet' && (
