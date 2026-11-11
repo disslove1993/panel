@@ -24,8 +24,14 @@ import {
   AlertCircle,
   CheckCircle2,
   Terminal,
+  CreditCard,
+  Send,
+  X,
+  Eye,
+  Bot,
+  Upload,
 } from 'lucide-react';
-import { BridgePlan, BridgeServerItem, BridgeUser } from '../types/bridge';
+import { BridgePlan, BridgeServerItem, BridgeUser, BridgeCardTransferOrder } from '../types/bridge';
 import { formatBytes } from '../utils/sanaeiHelpers';
 
 interface BridgeManagementViewProps {
@@ -46,11 +52,23 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
   const [newGiftTokens, setNewGiftTokens] = useState('1000');
   const [giftStatusMsg, setGiftStatusMsg] = useState<string | null>(null);
   const [zibalMerchant, setZibalMerchant] = useState('68b314a9a45c720017ff86cb');
+  const [zibalCallbackUrl, setZibalCallbackUrl] = useState('');
   const [zibalEnabled, setZibalEnabled] = useState(true);
   const [paymentTesting, setPaymentTesting] = useState(false);
   const [paymentMsg, setPaymentMsg] = useState<string | null>(null);
   const [walletPackages, setWalletPackages] = useState<any[]>([]);
 
+  // Card to Card & Telegram Bot State
+  const [cardToCardEnabled, setCardToCardEnabled] = useState(true);
+  const [bankCardNumber, setBankCardNumber] = useState('6037997512345678');
+  const [bankCardOwner, setBankCardOwner] = useState('مهدی حاجی محمدی');
+  const [bankName, setBankName] = useState('بانک ملی ایران');
+  const [telegramBotToken, setTelegramBotToken] = useState('');
+  const [telegramAdminChatId, setTelegramAdminChatId] = useState('');
+  const [cardOrders, setCardOrders] = useState<BridgeCardTransferOrder[]>([]);
+  const [telegramTesting, setTelegramTesting] = useState(false);
+  const [telegramTestMsg, setTelegramTestMsg] = useState<string | null>(null);
+  const [viewingReceiptModal, setViewingReceiptModal] = useState<BridgeCardTransferOrder | null>(null);
 
   // Simulator State
   const [simEmail, setSimEmail] = useState('user_' + Math.floor(1000 + Math.random() * 9000) + '@app.local');
@@ -84,6 +102,30 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
         setUsers(data.users || []);
         setPlans(data.plans || []);
         setServers(data.servers || []);
+        if (data.settings?.zibalMerchant) {
+          setZibalMerchant(data.settings.zibalMerchant);
+        }
+        if (data.settings?.zibalCallbackUrl) {
+          setZibalCallbackUrl(data.settings.zibalCallbackUrl);
+        }
+        if (data.settings?.cardToCardEnabled !== undefined) {
+          setCardToCardEnabled(data.settings.cardToCardEnabled);
+        }
+        if (data.settings?.bankCardNumber) {
+          setBankCardNumber(data.settings.bankCardNumber);
+        }
+        if (data.settings?.bankCardOwner) {
+          setBankCardOwner(data.settings.bankCardOwner);
+        }
+        if (data.settings?.bankName) {
+          setBankName(data.settings.bankName);
+        }
+        if (data.settings?.telegramBotToken) {
+          setTelegramBotToken(data.settings.telegramBotToken);
+        }
+        if (data.settings?.telegramAdminChatId) {
+          setTelegramAdminChatId(data.settings.telegramAdminChatId);
+        }
       }
     } catch (err) {
       console.error('Error fetching bridge overview:', err);
@@ -101,6 +143,18 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
       }
     } catch (err) {
       console.error('Error fetching gift codes:', err);
+    }
+  };
+
+  const fetchCardOrders = async () => {
+    try {
+      const res = await fetch('/api/bridge/admin/card-orders');
+      const data = await res.json();
+      if (data && data.success) {
+        setCardOrders(data.orders || []);
+      }
+    } catch (err) {
+      console.error('Error fetching card orders:', err);
     }
   };
 
@@ -139,25 +193,31 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
     }
   };
 
-  const handleUpdateZibalSettings = async () => {
+  const handleUpdateZibalSettings = async (merchantOverride?: string, callbackOverride?: string) => {
     try {
+      const merchantToSave = merchantOverride !== undefined ? merchantOverride : zibalMerchant.trim();
+      const callbackToSave = callbackOverride !== undefined ? callbackOverride : zibalCallbackUrl.trim();
       const res = await fetch('/api/bridge/admin/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          zibalMerchant: zibalMerchant.trim(),
+          zibalMerchant: merchantToSave,
+          zibalCallbackUrl: callbackToSave,
           zibalEnabled,
         }),
       });
       const data = await res.json();
       if (data.success) {
-        setPaymentMsg('مرچنت کد زیبال با موفقیت ذخیره و روی سرور اعمال شد.');
-        setTimeout(() => setPaymentMsg(null), 3500);
+        if (merchantOverride !== undefined) setZibalMerchant(merchantOverride);
+        if (callbackOverride !== undefined) setZibalCallbackUrl(callbackOverride);
+        setPaymentMsg('تنظیمات مرچنت و آدرس بازگشت زیبال با موفقیت ذخیره شد.');
+        setTimeout(() => setPaymentMsg(null), 4000);
       }
     } catch (err: any) {
       setPaymentMsg(err.message || 'خطا در ذخیره تنظیمات درگاه');
     }
   };
+
 
   const handleTestPayment = async (packageId: string) => {
     setPaymentTesting(true);
@@ -200,10 +260,86 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
     }
   };
 
+  const handleSaveCardAndTelegramSettings = async () => {
+    try {
+      const res = await fetch('/api/bridge/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cardToCardEnabled,
+          bankCardNumber,
+          bankCardOwner,
+          bankName,
+          telegramBotToken,
+          telegramAdminChatId,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPaymentMsg('تنظیمات کارت به کارت و ربات تلگرام با موفقیت ذخیره گردید.');
+        setTimeout(() => setPaymentMsg(null), 4000);
+      }
+    } catch (err: any) {
+      setPaymentMsg('خطا در ذخیره تنظیمات: ' + (err?.message || 'نامشخص'));
+    }
+  };
+
+  const handleTestTelegram = async () => {
+    setTelegramTesting(true);
+    setTelegramTestMsg(null);
+    try {
+      const res = await fetch('/api/bridge/telegram/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          botToken: telegramBotToken,
+          adminChatId: telegramAdminChatId,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTelegramTestMsg('✅ پیام تست با موفقیت ارسال شد! تلگرام خود را چک کنید.');
+      } else {
+        setTelegramTestMsg(`❌ ${data.message || 'خطا در ارسال پیام تست'}`);
+      }
+    } catch (err: any) {
+      setTelegramTestMsg(`❌ خطا در ارتباط با سرور: ${err?.message}`);
+    } finally {
+      setTelegramTesting(false);
+    }
+  };
+
+  const handleReviewCardOrder = async (orderId: string, action: 'approve' | 'reject') => {
+    let rejectionReason: string | undefined = undefined;
+    if (action === 'reject') {
+      const reason = window.prompt('علت رد فیش واریزی را وارد کنید (به کاربر در اپ نمایش داده می‌شود):', 'رسید نامعتبر است یا وجه به حساب واریز نشده است.');
+      if (reason === null) return;
+      rejectionReason = reason;
+    }
+
+    try {
+      const res = await fetch('/api/bridge/admin/card-transfer/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId, action, rejectionReason }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        fetchCardOrders();
+        fetchBridgeData();
+      } else {
+        alert(data.message || 'خطا در بررسی فیش');
+      }
+    } catch (e: any) {
+      alert('خطا در ارتباط با سرور: ' + e?.message);
+    }
+  };
+
   useEffect(() => {
     fetchBridgeData();
     fetchGiftCodes();
     fetchPaymentPackages();
+    fetchCardOrders();
   }, []);
 
 
@@ -333,7 +469,47 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
      - نمایش تاریخچه پرداخت‌های آنلاین درگاه زیبال، هدایای خوش‌آمدگویی و خریدهای اشتراک.
 
 ============================================================
-۴. نحوه اتصال مستقیم VPN (دکمه Tap to Connect):
+۴. سیستم پرداخت کارت به کارت (Card to Card) با تایید ربات تلگرام:
+============================================================
+- در کنار درگاه زیبال، امکان پرداخت با «کارت به کارت» را در اپلیکیشن اضافه کن.
+- متد دریافت اطلاعات حساب بانکی و وضعیت درگاه‌ها:
+  GET {BASE_URL}/api/bridge/payment/methods
+  پاسخ سرور شامل اطلاعات کارت بانکی است:
+  {
+    "cardToCard": {
+      "enabled": true,
+      "bankCardNumber": "6037997512345678",
+      "bankCardOwner": "مهدی حاجی محمدی",
+      "bankName": "بانک ملی ایران"
+    }
+  }
+- با لمس گزینه کارت به کارت، یک مودال (Modal) باز شود شامل:
+  • شماره کارت بانکی با دکمه ۱-تپ برای کپی کردن
+  • نام صاحب حساب و نام بانک
+  • مبلغ بسته مورد نظر به تومان (مثلاً ۱۰,۰۰۰ تومان برای ۱۰۰ توکن)
+  • دکمه انتخاب عکس فیش واریزی (عکس رسید انتقال وجه) از گالری و تبدیل آن به Base64
+  • فیلد متنی اختیاری برای یادداشت یا شماره پیگیری
+  • دکمه «ارسال فیش و تایید نهایی»
+- با ارسال فیش، درخواست به متد زیر فرستاده شود:
+  POST {BASE_URL}/api/bridge/card-transfer/submit
+  بدنه:
+  {
+    "userId": user.id,
+    "packageId": "pack_100",
+    "tokens": 100,
+    "amountTomans": 10000,
+    "receiptImageBase64": "data:image/jpeg;base64,...",
+    "userNotes": "واریز از همراه بانک"
+  }
+- سرور فیش واریزی را ثبت کرده و بلافاصله تصویر آن را به همراه دکمه‌های [تایید و شارژ] و [رد فیش] به ربات تلگرام مدیر ارسال می‌کند.
+- اپلیکیشن پس از ارسال فیش، یک صفحه انتظار زیبا نمایش دهد و وضعیت سفارش را با متد:
+  GET {BASE_URL}/api/bridge/card-transfer/status/{orderId}
+  هر ۴ ثانیه بررسی کند:
+  • اگر status === 'approved' شد: پیام تبریک موفقیت نشان داده شود، حساب کاربر به صورت خودکار شارژ شده و موجودی توکن جدید در بالای برنامه اعمال شود.
+  • اگر status === 'rejected' شد: پیام «پرداخت ناموفق بود یا رسید ارسالی نامعتبر است» نمایش داده شود.
+
+============================================================
+۵. نحوه اتصال مستقیم VPN (دکمه Tap to Connect):
 ============================================================
 - اگر کاربر اشتراک فعال دارد (user.subscription.status === 'active')، با کلیک روی دکمه بزرگ دایره‌ای، مستقیماً از رشته configUri دریافت شده از ثنایی (vless://...) برای استارت هسته VPN استفاده کن.
 - اگر اشتراک نداشت، لیست پلن‌ها (GET /api/bridge/plans) را باز کن تا با توکن‌های خریداری شده یا هدیه‌اش (۱۰۰۰ توکن) اشتراک ۱ ماهه ۱۰ گیگ را فعال کند.`;
@@ -1389,7 +1565,7 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                 />
                 <button
                   type="button"
-                  onClick={handleUpdateZibalSettings}
+                  onClick={() => handleUpdateZibalSettings()}
                   className="px-3.5 py-1.5 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs rounded-lg transition-all shadow"
                 >
                   ذخیره مرچنت
@@ -1400,8 +1576,7 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                 <button
                   type="button"
                   onClick={() => {
-                    setZibalMerchant('zibal');
-                    handleUpdateZibalSettings();
+                    handleUpdateZibalSettings('zibal', '');
                   }}
                   className="px-3 py-1.5 text-xs bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 rounded-lg text-slate-700 dark:text-slate-200 transition-colors"
                 >
@@ -1410,8 +1585,7 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                 <button
                   type="button"
                   onClick={() => {
-                    setZibalMerchant('68b314a9a45c720017ff86cb');
-                    handleUpdateZibalSettings();
+                    handleUpdateZibalSettings('68b314a9a45c720017ff86cb');
                   }}
                   className="px-3 py-1.5 text-xs bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 rounded-lg transition-colors font-medium"
                 >
@@ -1419,6 +1593,62 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                 </button>
               </div>
             </div>
+
+            {/* Callback URL Configuration & Zibal Domain Guide */}
+            <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl space-y-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2 text-xs font-bold text-amber-400">
+                  <AlertCircle className="w-4 h-4 text-amber-400" />
+                  <span>دلیل خطای «آدرس بازگشت نامعتبر است» و راه‌حل آن:</span>
+                </div>
+                <span className="text-[11px] text-slate-400">قانون امنیتی شاپرک / زیبال (کد خطا: 106)</span>
+              </div>
+
+              <p className="text-xs text-amber-200/90 leading-relaxed">
+                همان‌طور که در پنل زیبال شما مشخص است، دامنه ثبت شده برای این مرچنت <strong>baharak.sbs</strong> می‌باشد. زیبال اجازه نمی‌دهد درخواست پرداخت از دامنه‌ای غیر از دامنه ثبت‌شده ارسال شود، مگر آنکه دامنه در پنل زیبال بروزرسانی شود.
+              </p>
+
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
+                <input
+                  type="text"
+                  value={zibalCallbackUrl}
+                  onChange={(e) => setZibalCallbackUrl(e.target.value)}
+                  placeholder="آدرس بازگشت (Callback URL) دلخواه"
+                  className="px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs font-mono text-slate-100 flex-1 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  dir="ltr"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleUpdateZibalSettings()}
+                  className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs rounded-lg shadow transition-all whitespace-nowrap"
+                >
+                  ذخیره آدرس بازگشت
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+                <span className="text-slate-400 text-[11px]">انتخاب‌های سریع:</span>
+                <button
+                  type="button"
+                  onClick={() => handleUpdateZibalSettings(undefined, 'https://baharak.sbs/api/bridge/payment/callback')}
+                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 rounded text-[11px] font-mono transition-colors"
+                >
+                  baharak.sbs (دامنه ثبت شده در پنل زیبال شما)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleUpdateZibalSettings(undefined, 'http://app.wpbaharak.ir:3000/api/bridge/payment/callback')}
+                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-sky-300 rounded text-[11px] font-mono transition-colors"
+                >
+                  app.wpbaharak.ir:3000 (دامنه فعلی سرور)
+                </button>
+              </div>
+
+              <div className="text-[11px] text-slate-400 border-t border-amber-500/20 pt-2">
+                💡 <strong>برای حل دائم با دامنه app.wpbaharak.ir:</strong> کافیست در پنل زیبال (تب <strong>تنظیمات</strong> درگاه) دامنه سایت را از <code className="text-white font-mono">baharak.sbs</code> به <code className="text-white font-mono">app.wpbaharak.ir</code> یا <code className="text-white font-mono">wpbaharak.ir</code> تغییر دهید.
+              </div>
+            </div>
+
 
             {/* Token Packages Display with Live Test Button */}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 pt-2">
@@ -1478,6 +1708,382 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                 </div>
               ))}
             </div>
+          </div>
+
+          {/* CARD-TO-CARD & TELEGRAM BOT SYSTEM */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center shrink-0">
+                  <CreditCard className="w-5 h-5 text-purple-400" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                    سیستم پرداخت کارت به کارت (Card to Card) و تایید هوشمند از ربات تلگرام
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    کاربر در اپلیکیشن مبلغ را کارت‌به‌کارت می‌کند، تصویر فیش را می‌فرستد و عکس بلافاصله برای ربات تلگرام شما ارسال می‌شود تا با یک کلیک تایید یا رد کنید. با تایید شما، حساب کاربر فوراً شارژ می‌شود.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 shrink-0">
+                <label className="flex items-center gap-2 cursor-pointer bg-slate-100 dark:bg-slate-800 px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={cardToCardEnabled}
+                    onChange={(e) => setCardToCardEnabled(e.target.checked)}
+                    className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
+                  />
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                    {cardToCardEnabled ? 'کارت به کارت فعال است' : 'کارت به کارت غیرفعال'}
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            {/* Bank Card Info Inputs */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-600 dark:text-slate-400 font-medium">شماره کارت بانکی (۱۶ رقمی):</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={bankCardNumber}
+                    onChange={(e) => setBankCardNumber(e.target.value)}
+                    placeholder="مثلاً 6037997512345678"
+                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    dir="ltr"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => copyToClipboard(bankCardNumber, 'card_num')}
+                    className="absolute left-2.5 top-2 text-slate-400 hover:text-purple-400 transition-colors"
+                    title="کپی شماره کارت"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                {copiedSection === 'card_num' && (
+                  <span className="text-[10px] text-purple-400">شماره کارت کپی شد</span>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-600 dark:text-slate-400 font-medium">نام و نام خانوادگی صاحب کارت:</label>
+                <input
+                  type="text"
+                  value={bankCardOwner}
+                  onChange={(e) => setBankCardOwner(e.target.value)}
+                  placeholder="مثلاً مهدی حاجی محمدی"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-600 dark:text-slate-400 font-medium">نام بانک:</label>
+                <input
+                  type="text"
+                  value={bankName}
+                  onChange={(e) => setBankName(e.target.value)}
+                  placeholder="مثلاً بانک ملی ایران"
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+            </div>
+
+            {/* Telegram Bot Configuration */}
+            <div className="p-5 bg-gradient-to-br from-sky-500/10 via-slate-800/40 to-slate-900 border border-sky-500/30 rounded-2xl space-y-4">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2 text-sm font-bold text-sky-400">
+                  <Bot className="w-4 h-4 text-sky-400" />
+                  <span>اتصال به ربات تلگرام جهت ارسال فیش و دکمه‌های تایید آنی</span>
+                </div>
+                <span className="text-[11px] text-slate-400">تایید دوطرفه: هم از تلگرام و هم از همین پنل وب</span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs text-slate-300 font-medium flex items-center justify-between">
+                    <span>توکن ربات تلگرام (Bot Token):</span>
+                    <span className="text-[10px] text-slate-400">از @BotFather</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={telegramBotToken}
+                    onChange={(e) => setTelegramBotToken(e.target.value)}
+                    placeholder="مثلاً 7123456789:AAHk..."
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-mono text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    dir="ltr"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs text-slate-300 font-medium flex items-center justify-between">
+                    <span>شناسه عددی چت ادمین (Admin Chat ID):</span>
+                    <span className="text-[10px] text-slate-400">از @userinfobot</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={telegramAdminChatId}
+                    onChange={(e) => setTelegramAdminChatId(e.target.value)}
+                    placeholder="مثلاً 542198765"
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-mono text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    dir="ltr"
+                  />
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleSaveCardAndTelegramSettings}
+                    className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-xl shadow transition-all flex items-center gap-1.5"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>ذخیره تنظیمات کارت و تلگرام</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={telegramTesting}
+                    onClick={handleTestTelegram}
+                    className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs rounded-xl shadow transition-all flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>{telegramTesting ? 'در حال ارسال تست...' : 'تست اتصال به ربات تلگرام'}</span>
+                  </button>
+                </div>
+
+                {telegramTestMsg && (
+                  <div className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-200">
+                    {telegramTestMsg}
+                  </div>
+                )}
+              </div>
+
+              {/* Step by step guide */}
+              <div className="text-[11px] text-slate-400 bg-slate-950/60 p-3.5 rounded-xl border border-slate-800 space-y-1.5">
+                <div className="font-bold text-sky-400">راهنمای ۱ دقیقه‌ای راه‌اندازی ربات تلگرام:</div>
+                <div>۱. در تلگرام وارد ربات <strong>@BotFather</strong> شده و دستور <code>/newbot</code> را بفرستید و یک نام و آیدی برای ربات خود انتخاب نمایید تا <strong>HTTP API Token</strong> را تحویل دهد.</div>
+                <div>۲. در تلگرام وارد ربات <strong>@userinfobot</strong> شوید تا عدد <strong>Id</strong> حساب خودتان را به شما بدهد و در کادر بالا وارد کنید.</div>
+                <div>۳. وارد ربات اختصاصی که در مرحله ۱ ساختید شده و دکمه <strong>Start</strong> را بزنید، سپس دکمه «تست اتصال به ربات تلگرام» را در همین صفحه لمس کنید!</div>
+              </div>
+            </div>
+
+            {/* User Receipts Table (Dual Approval: Telegram or Web Panel) */}
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                    رسیدهای پرداخت کارت به کارت ارسالی توسط کاربران
+                  </h4>
+                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-400 font-mono font-bold">
+                    {cardOrders.filter((o) => o.status === 'pending').length} در انتظار تایید
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={fetchCardOrders}
+                  className="text-xs text-sky-500 hover:underline flex items-center gap-1"
+                >
+                  <Activity className="w-3 h-3" />
+                  <span>بروزرسانی لیست فیش‌ها</span>
+                </button>
+              </div>
+
+              {cardOrders.length === 0 ? (
+                <div className="p-8 text-center bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 rounded-2xl text-xs text-slate-400">
+                  هنوز رسید پرداختی ثبت نشده است. با ارسال رسید از اپلیکیشن موبایل، عکس و مشخصات فیش فوراً در اینجا و در تلگرام شما ظاهر می‌شود.
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-500 dark:text-slate-400">
+                      <tr>
+                        <th className="p-3">تصویر فیش</th>
+                        <th className="p-3">مشخصات کاربر</th>
+                        <th className="p-3">توکن / مبلغ</th>
+                        <th className="p-3">تاریخ ثبت</th>
+                        <th className="p-3">وضعیت</th>
+                        <th className="p-3 text-center">عملیات مدیریت</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800 font-medium">
+                      {cardOrders.map((order) => (
+                        <tr key={order.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                          <td className="p-3">
+                            {order.receiptImageUrl ? (
+                              <button
+                                type="button"
+                                onClick={() => setViewingReceiptModal(order)}
+                                className="relative group block w-14 h-14 rounded-lg overflow-hidden border border-slate-700 bg-slate-900"
+                              >
+                                <img
+                                  src={order.receiptImageUrl}
+                                  alt="فیش واریزی"
+                                  className="w-full h-full object-cover group-hover:scale-110 transition-transform"
+                                />
+                                <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <Eye className="w-4 h-4 text-white" />
+                                </div>
+                              </button>
+                            ) : (
+                              <div className="w-14 h-14 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] text-slate-500 text-center p-1">
+                                بدون عکس
+                              </div>
+                            )}
+                          </td>
+                          <td className="p-3">
+                            <div className="font-bold text-slate-900 dark:text-slate-100">{order.userName || 'کاربر'}</div>
+                            <div className="text-[11px] text-slate-400 font-mono" dir="ltr">{order.userEmail}</div>
+                            {order.userNotes && (
+                              <div className="text-[10px] text-purple-400 mt-1">یادداشت: {order.userNotes}</div>
+                            )}
+                          </td>
+                          <td className="p-3">
+                            <div className="font-bold text-amber-500 font-mono">{order.tokens.toLocaleString()} توکن</div>
+                            <div className="text-[11px] text-slate-400 font-mono">{order.amountTomans.toLocaleString()} تومان</div>
+                          </td>
+                          <td className="p-3 text-slate-400 font-mono text-[11px]">
+                            {new Date(order.createdAt).toLocaleDateString('fa-IR')}
+                            <div className="text-[10px] text-slate-500">{new Date(order.createdAt).toLocaleTimeString('fa-IR')}</div>
+                          </td>
+                          <td className="p-3">
+                            {order.status === 'pending' && (
+                              <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                                در انتظار بررسی
+                              </span>
+                            )}
+                            {order.status === 'approved' && (
+                              <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                تایید و شارژ شد ✅
+                              </span>
+                            )}
+                            {order.status === 'rejected' && (
+                              <div>
+                                <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">
+                                  رد شد ❌
+                                </span>
+                                {order.rejectionReason && (
+                                  <div className="text-[10px] text-rose-300 mt-1">{order.rejectionReason}</div>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                          <td className="p-3 text-center">
+                            {order.status === 'pending' ? (
+                              <div className="flex items-center justify-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleReviewCardOrder(order.id, 'approve')}
+                                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-all shadow flex items-center gap-1"
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                  <span>تایید و شارژ</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleReviewCardOrder(order.id, 'reject')}
+                                  className="px-3 py-1.5 bg-rose-600/80 hover:bg-rose-500 text-white rounded-lg text-xs font-bold transition-all shadow flex items-center gap-1"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                  <span>رد فیش</span>
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-slate-500">بررسی شده</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RECEIPT IMAGE VIEWER MODAL */}
+      {viewingReceiptModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-5 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                <Eye className="w-4 h-4 text-purple-400" />
+                <span>مشاهده تصویر فیش واریزی ({viewingReceiptModal.id})</span>
+              </h4>
+              <button
+                type="button"
+                onClick={() => setViewingReceiptModal(null)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {viewingReceiptModal.receiptImageUrl ? (
+              <div className="rounded-xl overflow-hidden border border-slate-800 bg-black flex items-center justify-center max-h-[60vh]">
+                <img
+                  src={viewingReceiptModal.receiptImageUrl}
+                  alt="فیش واریزی"
+                  className="max-h-[60vh] w-auto object-contain"
+                />
+              </div>
+            ) : (
+              <div className="p-8 text-center text-slate-400 text-xs">عکسی همراه این فیش ارسال نشده است.</div>
+            )}
+
+            <div className="p-3 bg-slate-950 rounded-xl text-xs space-y-1">
+              <div className="flex justify-between text-slate-300">
+                <span>کاربر:</span>
+                <span className="font-bold">{viewingReceiptModal.userName} ({viewingReceiptModal.userEmail})</span>
+              </div>
+              <div className="flex justify-between text-slate-300">
+                <span>مبلغ فیش:</span>
+                <span className="font-bold text-emerald-400">{viewingReceiptModal.amountTomans.toLocaleString()} تومان ({viewingReceiptModal.tokens.toLocaleString()} توکن)</span>
+              </div>
+              {viewingReceiptModal.userNotes && (
+                <div className="flex justify-between text-slate-300">
+                  <span>یادداشت:</span>
+                  <span className="text-purple-300">{viewingReceiptModal.userNotes}</span>
+                </div>
+              )}
+            </div>
+
+            {viewingReceiptModal.status === 'pending' && (
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const id = viewingReceiptModal.id;
+                    setViewingReceiptModal(null);
+                    handleReviewCardOrder(id, 'approve');
+                  }}
+                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow flex items-center justify-center gap-1.5"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>تایید و شارژ توکن</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const id = viewingReceiptModal.id;
+                    setViewingReceiptModal(null);
+                    handleReviewCardOrder(id, 'reject');
+                  }}
+                  className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition-all shadow flex items-center justify-center gap-1.5"
+                >
+                  <X className="w-4 h-4" />
+                  <span>رد فیش واریزی</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

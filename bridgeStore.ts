@@ -7,7 +7,9 @@ import {
   BridgeWalletTransaction,
   BridgeGiftCode,
   BridgePaymentOrder,
+  BridgeCardTransferOrder,
 } from './src/types/bridge';
+
 
 const STORE_PATH = path.resolve(process.cwd(), 'bridge_store.json');
 
@@ -67,6 +69,13 @@ const DEFAULT_SETTINGS: BridgeSettings = {
   zibalMerchant: '68b314a9a45c720017ff86cb',
   zibalEnabled: true,
   zibalCallbackUrl: '',
+  // Card to Card & Telegram Bot Settings
+  cardToCardEnabled: true,
+  bankCardNumber: '6037997512345678',
+  bankCardOwner: 'مهدی حاجی محمدی',
+  bankName: 'بانک ملی ایران',
+  telegramBotToken: '',
+  telegramAdminChatId: '',
   plans: DEFAULT_PLANS,
   giftCodes: [
     {
@@ -131,6 +140,7 @@ interface BridgeDatabase {
   transactions?: BridgeWalletTransaction[];
   redeemedCodes?: Record<string, string[]>; // code -> array of userIds
   orders?: Record<string, BridgePaymentOrder>;
+  cardOrders?: Record<string, BridgeCardTransferOrder>;
 }
 
 class BridgeStoreManager {
@@ -151,6 +161,7 @@ class BridgeStoreManager {
           transactions: parsed.transactions || [],
           redeemedCodes: parsed.redeemedCodes || {},
           orders: parsed.orders || {},
+          cardOrders: parsed.cardOrders || {},
         };
       }
     } catch (err) {
@@ -162,6 +173,7 @@ class BridgeStoreManager {
       transactions: [],
       redeemedCodes: {},
       orders: {},
+      cardOrders: {},
     };
   }
 
@@ -429,6 +441,80 @@ class BridgeStoreManager {
   getAllPaymentOrders(): BridgePaymentOrder[] {
     if (!this.data.orders) return [];
     return Object.values(this.data.orders).sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  // --- Card to Card Transfer Orders Management ---
+  createCardOrder(order: BridgeCardTransferOrder): BridgeCardTransferOrder {
+    if (!this.data.cardOrders) this.data.cardOrders = {};
+    this.data.cardOrders[order.id] = order;
+    this.saveToDisk();
+    return order;
+  }
+
+  getCardOrder(orderId: string): BridgeCardTransferOrder | undefined {
+    return this.data.cardOrders ? this.data.cardOrders[orderId] : undefined;
+  }
+
+  updateCardOrder(order: BridgeCardTransferOrder): BridgeCardTransferOrder {
+    if (!this.data.cardOrders) this.data.cardOrders = {};
+    this.data.cardOrders[order.id] = order;
+    this.saveToDisk();
+    return order;
+  }
+
+  getAllCardOrders(): BridgeCardTransferOrder[] {
+    if (!this.data.cardOrders) return [];
+    return Object.values(this.data.cardOrders).sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  approveCardOrder(orderId: string): { success: boolean; order?: BridgeCardTransferOrder; user?: BridgeUser; message: string } {
+    const order = this.getCardOrder(orderId);
+    if (!order) {
+      return { success: false, message: 'رسید پرداخت کارت به کارت یافت نشد.' };
+    }
+    if (order.status === 'approved') {
+      return { success: true, order, message: 'این رسید قبلاً تایید و حساب کاربر شارژ شده است.' };
+    }
+
+    order.status = 'approved';
+    order.reviewedAt = Date.now();
+    this.updateCardOrder(order);
+
+    // Credit user tokens
+    const adjustResult = this.adjustUserTokens(
+      order.userId,
+      order.tokens,
+      'topup',
+      `واریز کارت به کارت (سفارش ${order.id})`
+    );
+
+    return {
+      success: true,
+      order,
+      user: adjustResult.user,
+      message: `سفارش کارت به کارت تایید شد و ${order.tokens} توکن به حساب کاربر واریز گردید!`,
+    };
+  }
+
+  rejectCardOrder(orderId: string, reason?: string): { success: boolean; order?: BridgeCardTransferOrder; message: string } {
+    const order = this.getCardOrder(orderId);
+    if (!order) {
+      return { success: false, message: 'سفارش کارت به کارت یافت نشد.' };
+    }
+    if (order.status === 'approved') {
+      return { success: false, message: 'امکان رد سفارشی که قبلاً تایید شده وجود ندارد.' };
+    }
+
+    order.status = 'rejected';
+    order.rejectionReason = reason || 'رسید ارسالی نامعتبر است یا وجه به حساب واریز نشده است.';
+    order.reviewedAt = Date.now();
+    this.updateCardOrder(order);
+
+    return {
+      success: true,
+      order,
+      message: 'سفارش کارت به کارت رد شد.',
+    };
   }
 }
 

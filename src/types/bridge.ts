@@ -101,6 +101,23 @@ export interface BridgePaymentOrder {
   createdAt: number;
 }
 
+export interface BridgeCardTransferOrder {
+  id: string; // e.g. c2c_12345
+  userId: string;
+  userEmail: string;
+  userName: string;
+  tokens: number;
+  amountTomans: number;
+  receiptImageBase64?: string;
+  receiptImageUrl?: string;
+  userNotes?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  rejectionReason?: string;
+  reviewedAt?: number;
+  telegramMessageId?: number;
+  createdAt: number;
+}
+
 export interface BridgeSettings {
   apiKey: string;
   adminPassword?: string;
@@ -116,6 +133,14 @@ export interface BridgeSettings {
   zibalMerchant: string;
   zibalEnabled: boolean;
   zibalCallbackUrl?: string;
+  // Card to Card & Telegram Settings
+  cardToCardEnabled: boolean;
+  bankCardNumber: string;
+  bankCardOwner: string;
+  bankName: string;
+  telegramBotToken: string;
+  telegramAdminChatId: string;
 }
+
 
 

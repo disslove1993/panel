@@ -612,7 +612,19 @@ async function fetchOnlineClients(session: AuthSession, allowInsecure = true): P
 
 async function startServer() {
   const app = express();
-  app.use(express.json({ limit: '5mb' }));
+  app.use(express.json({ limit: '25mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+
+  // Ensure public uploads receipts directory exists
+  const receiptsDir = path.resolve(__dirname, 'public/uploads/receipts');
+  try {
+    if (!fs.existsSync(receiptsDir)) {
+      fs.mkdirSync(receiptsDir, { recursive: true });
+    }
+  } catch (err) {
+    console.warn('Could not create receipts dir:', err);
+  }
+  app.use('/uploads', express.static(path.resolve(__dirname, 'public/uploads')));
 
   // Direct Install Script for VPS
   app.get('/install.sh', (_req, res) => {
@@ -1415,13 +1427,14 @@ async function startServer() {
       if (zibalData.result !== 100) {
         const errorMessages: Record<number, string> = {
           102: 'کد مرچنت در درگاه زیبال یافت نشد (کد مرچنت در تنظیمات مدیریت را بررسی کنید).',
-          103: 'درگاه زیبال غیرفعال است یا قرارداد امضا نشده است.',
+          103: 'درگاه زیبال غیرفعال است یا قرارداد درگاه امضا نشده است.',
           104: 'کد مرچنت زیبال نامعتبر است.',
           105: 'مبلغ سفارش کمتر از حداقل مجاز (۱۰۰۰ ریال) است.',
-          106: 'آدرس بازگشت (Callback URL) نامعتبر است.',
+          106: 'دامنه آدرس بازگشت (Callback URL) با دامنه ثبت شده در پنل زیبال شما (baharak.sbs) مطابقت ندارد. برای حل آن: در پنل زیبال (تب تنظیمات درگاه) آدرس سایت را به wpbaharak.ir یا app.wpbaharak.ir تغییر دهید، یا در کادر زیر آدرس بازگشت را تنظیم کنید.',
           113: 'مبلغ تراکنش بیش از سقف مجاز است.',
           115: 'آی‌پی سرور در پنل زیبال ثبت نشده است.',
         };
+
         const msg = errorMessages[zibalData.result] || zibalData.message || `خطای درگاه زیبال (کد ${zibalData.result})`;
         return res.status(400).json({ success: false, message: msg, result: zibalData.result });
       }
@@ -1606,16 +1619,450 @@ async function startServer() {
     });
   });
 
-  // 24. Admin Settings: Update Zibal Merchant & Config
+  // 24. Admin Settings: Update Zibal, Card-to-Card, and Telegram Config
   app.post('/api/bridge/admin/settings', (req, res) => {
-    const { zibalMerchant, zibalEnabled, zibalCallbackUrl, welcomeTokens } = req.body;
+    const {
+      zibalMerchant,
+      zibalEnabled,
+      zibalCallbackUrl,
+      welcomeTokens,
+      cardToCardEnabled,
+      bankCardNumber,
+      bankCardOwner,
+      bankName,
+      telegramBotToken,
+      telegramAdminChatId,
+    } = req.body;
     const updated = bridgeStore.updateSettings({
       ...(zibalMerchant !== undefined ? { zibalMerchant: String(zibalMerchant).trim() } : {}),
       ...(zibalEnabled !== undefined ? { zibalEnabled: Boolean(zibalEnabled) } : {}),
       ...(zibalCallbackUrl !== undefined ? { zibalCallbackUrl: String(zibalCallbackUrl).trim() } : {}),
       ...(welcomeTokens !== undefined ? { welcomeTokens: Number(welcomeTokens) || 1000 } : {}),
+      ...(cardToCardEnabled !== undefined ? { cardToCardEnabled: Boolean(cardToCardEnabled) } : {}),
+      ...(bankCardNumber !== undefined ? { bankCardNumber: String(bankCardNumber).trim() } : {}),
+      ...(bankCardOwner !== undefined ? { bankCardOwner: String(bankCardOwner).trim() } : {}),
+      ...(bankName !== undefined ? { bankName: String(bankName).trim() } : {}),
+      ...(telegramBotToken !== undefined ? { telegramBotToken: String(telegramBotToken).trim() } : {}),
+      ...(telegramAdminChatId !== undefined ? { telegramAdminChatId: String(telegramAdminChatId).trim() } : {}),
     });
     res.json({ success: true, settings: updated });
+  });
+
+  // 25. Payment Methods Endpoint (Both Zibal and Card to Card)
+  app.get('/api/bridge/payment/methods', (req, res) => {
+    const settings = bridgeStore.getSettings();
+    res.json({
+      success: true,
+      packages: WALLET_PACKAGES,
+      zibal: {
+        enabled: settings.zibalEnabled ?? true,
+        merchantConfigured: !!settings.zibalMerchant,
+      },
+      cardToCard: {
+        enabled: settings.cardToCardEnabled ?? true,
+        bankCardNumber: settings.bankCardNumber || '6037997512345678',
+        bankCardOwner: settings.bankCardOwner || 'مهدی حاجی محمدی',
+        bankName: settings.bankName || 'بانک ملی ایران',
+      },
+      telegramBotConfigured: !!(settings.telegramBotToken && settings.telegramAdminChatId),
+    });
+  });
+
+  // Helper: Send notification to Telegram bot
+  async function sendTelegramCardNotification(order: any, imageBuffer?: Buffer): Promise<boolean> {
+    const settings = bridgeStore.getSettings();
+    if (!settings.telegramBotToken || !settings.telegramAdminChatId) {
+      console.log('Telegram Bot Token or Admin Chat ID not set, skipping Telegram notification.');
+      return false;
+    }
+
+    const botToken = settings.telegramBotToken.trim();
+    const chatId = settings.telegramAdminChatId.trim();
+
+    const caption = `💳 <b>رسید جدید پرداخت کارت به کارت</b>\n━━━━━━━━━━━━━━━━━━━━\n👤 <b>کاربر:</b> ${order.userName || 'کاربر اپلیکیشن'}\n📧 <b>ایمیل / شناسه:</b> <code>${order.userEmail}</code>\n💎 <b>توکن درخواستی:</b> <b>${order.tokens.toLocaleString('fa-IR')} توکن</b>\n💰 <b>مبلغ فیش:</b> <b>${order.amountTomans.toLocaleString('fa-IR')} تومان</b>\n🆔 <b>کد سفارش:</b> <code>${order.id}</code>\n⏰ <b>زمان ثبت:</b> ${new Date(order.createdAt).toLocaleDateString('fa-IR')} - ${new Date(order.createdAt).toLocaleTimeString('fa-IR')}\n${order.userNotes ? `📝 <b>توضیح کاربر:</b> ${order.userNotes}\n` : ''}━━━━━━━━━━━━━━━━━━━━\n⚠️ لطفاً پس از تطبیق واریز با گردش حساب بانکی، روی یکی از دکمه‌های زیر کلیک کنید:`;
+
+    const replyMarkup = {
+      inline_keyboard: [
+        [
+          { text: '✅ تایید و شارژ توکن', callback_data: `c2c_approve:${order.id}` },
+          { text: '❌ رد فیش واریزی', callback_data: `c2c_reject:${order.id}` },
+        ],
+      ],
+    };
+
+    try {
+      if (imageBuffer && imageBuffer.length > 0) {
+        const formData = new FormData();
+        formData.append('chat_id', chatId);
+        formData.append('caption', caption);
+        formData.append('parse_mode', 'HTML');
+        formData.append('reply_markup', JSON.stringify(replyMarkup));
+        const blob = new Blob([imageBuffer as any], { type: 'image/jpeg' });
+        formData.append('photo', blob, `${order.id}.jpg`);
+
+        const resp = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+          method: 'POST',
+          body: formData,
+        });
+        const data = await resp.json() as any;
+        if (data?.ok && data.result?.message_id) {
+          order.telegramMessageId = data.result.message_id;
+          bridgeStore.updateCardOrder(order);
+          return true;
+        }
+        console.warn('Telegram sendPhoto response:', data);
+      }
+
+      // Fallback or text-only
+      const resp = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: caption + (order.receiptImageUrl ? `\n\n🖼️ <a href="${order.receiptImageUrl}">مشاهده فیش در مرورگر</a>` : ''),
+          parse_mode: 'HTML',
+          reply_markup: replyMarkup,
+        }),
+      });
+      const data = await resp.json() as any;
+      if (data?.ok && data.result?.message_id) {
+        order.telegramMessageId = data.result.message_id;
+        bridgeStore.updateCardOrder(order);
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('Error sending Telegram card notification:', err);
+      return false;
+    }
+  }
+
+  // Helper: Telegram Bot Callback Handler (used by both Long Polling and Webhook)
+  async function handleTelegramCallbackQuery(cb: any) {
+    const settings = bridgeStore.getSettings();
+    const botToken = settings.telegramBotToken?.trim();
+    if (!botToken) return;
+
+    const data = String(cb.data || '');
+    const cbId = cb.id;
+    const chatId = cb.message?.chat?.id;
+    const messageId = cb.message?.message_id;
+    const isPhoto = !!cb.message?.photo;
+
+    const answerCb = async (text: string, showAlert = false) => {
+      try {
+        await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ callback_query_id: cbId, text, show_alert: showAlert }),
+        });
+      } catch (e) {
+        console.error('Error answering callback:', e);
+      }
+    };
+
+    const updateMsg = async (statusText: string) => {
+      if (!chatId || !messageId) return;
+      try {
+        const origText = isPhoto ? (cb.message?.caption || '') : (cb.message?.text || '');
+        const newText = `${origText}\n\n${statusText}`;
+        const endpoint = isPhoto ? 'editMessageCaption' : 'editMessageText';
+        const bodyKey = isPhoto ? 'caption' : 'text';
+
+        await fetch(`https://api.telegram.org/bot${botToken}/${endpoint}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            message_id: messageId,
+            [bodyKey]: newText,
+            parse_mode: 'HTML',
+            reply_markup: { inline_keyboard: [] },
+          }),
+        });
+      } catch (e) {
+        console.error('Error updating telegram msg:', e);
+      }
+    };
+
+    if (data.startsWith('c2c_approve:')) {
+      const orderId = data.replace('c2c_approve:', '').trim();
+      const res = bridgeStore.approveCardOrder(orderId);
+      if (res.success) {
+        await answerCb(`✅ سفارش ${orderId} با موفقیت تایید و ${res.order?.tokens} توکن شارژ گردید!`, false);
+        await updateMsg(`━━━━━━━━━━━━━━━━━━━━\n✅ <b>وضعیت: توسط ادمین در تلگرام تایید و شارژ شد!</b>\n⏰ زمان: ${new Date().toLocaleTimeString('fa-IR')}`);
+      } else {
+        await answerCb(res.message || 'خطا در تایید سفارش', true);
+      }
+    } else if (data.startsWith('c2c_reject:')) {
+      const orderId = data.replace('c2c_reject:', '').trim();
+      const res = bridgeStore.rejectCardOrder(orderId, 'رسید نامعتبر است یا وجه به حساب واریز نشده است.');
+      if (res.success) {
+        await answerCb(`❌ سفارش ${orderId} رد شد.`, false);
+        await updateMsg(`━━━━━━━━━━━━━━━━━━━━\n❌ <b>وضعیت: توسط ادمین در تلگرام رد شد!</b>\n⏰ زمان: ${new Date().toLocaleTimeString('fa-IR')}`);
+      } else {
+        await answerCb(res.message || 'خطا در رد سفارش', true);
+      }
+    }
+  }
+
+  // Telegram Long Polling Background Loop
+  let isPollingRunning = false;
+  async function runTelegramPollingLoop() {
+    if (isPollingRunning) return;
+    isPollingRunning = true;
+    let offset = 0;
+
+    while (true) {
+      try {
+        const settings = bridgeStore.getSettings();
+        const botToken = settings.telegramBotToken?.trim();
+
+        if (!botToken) {
+          await new Promise((r) => setTimeout(r, 8000));
+          continue;
+        }
+
+        const resp = await fetch(`https://api.telegram.org/bot${botToken}/getUpdates?offset=${offset}&timeout=15`, {
+          signal: AbortSignal.timeout(20000),
+        });
+
+        if (!resp.ok) {
+          await new Promise((r) => setTimeout(r, 5000));
+          continue;
+        }
+
+        const data = await resp.json() as any;
+        if (data?.ok && Array.isArray(data.result)) {
+          for (const update of data.result) {
+            offset = Math.max(offset, update.update_id + 1);
+            if (update.callback_query) {
+              await handleTelegramCallbackQuery(update.callback_query);
+            }
+          }
+        }
+      } catch (err: any) {
+        await new Promise((r) => setTimeout(r, 4000));
+      }
+    }
+  }
+
+  // Start polling in background
+  runTelegramPollingLoop().catch((err) => console.error('Telegram loop error:', err));
+
+  // 26. Card-to-Card: Submit Order & Receipt Photo
+  app.post('/api/bridge/card-transfer/submit', async (req, res) => {
+    try {
+      const { userId, packageId, tokens: customTokens, amountTomans: customAmount, receiptImageBase64, userNotes } = req.body;
+      const user = bridgeStore.findUserByIdOrEmail(userId);
+      if (!user) {
+        return res.status(404).json({ success: false, message: 'کاربر ثبت نام شده یافت نشد.' });
+      }
+
+      let tokens = 100;
+      let amountTomans = 10000;
+
+      if (packageId) {
+        const pack = WALLET_PACKAGES.find((p) => p.id === packageId);
+        if (pack) {
+          tokens = pack.tokens + (pack.bonusTokens || 0);
+          amountTomans = pack.priceTomans;
+        }
+      } else if (customTokens && Number(customTokens) > 0) {
+        tokens = Number(customTokens);
+        amountTomans = customAmount ? Number(customAmount) : tokens * 100;
+      }
+
+      const orderId = `c2c_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      let receiptImageUrl = '';
+      let imgBuffer: Buffer | undefined = undefined;
+
+      if (receiptImageBase64) {
+        try {
+          const cleanBase64 = String(receiptImageBase64).replace(/^data:image\/\w+;base64,/, '');
+          imgBuffer = Buffer.from(cleanBase64, 'base64');
+          const fileName = `${orderId}.jpg`;
+          const filePath = path.resolve(__dirname, 'public/uploads/receipts', fileName);
+          fs.writeFileSync(filePath, imgBuffer);
+          const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+          const host = req.get('host') || 'app.wpbaharak.ir:3000';
+          receiptImageUrl = `${proto}://${host}/uploads/receipts/${fileName}`;
+        } catch (saveErr) {
+          console.warn('Could not save receipt image to disk:', saveErr);
+        }
+      }
+
+      const order = bridgeStore.createCardOrder({
+        id: orderId,
+        userId: user.id,
+        userEmail: user.email,
+        userName: user.name || 'کاربر',
+        tokens,
+        amountTomans,
+        receiptImageBase64: receiptImageBase64 ? String(receiptImageBase64).substring(0, 100) + '...' : undefined,
+        receiptImageUrl,
+        userNotes: userNotes ? String(userNotes).trim() : '',
+        status: 'pending',
+        createdAt: Date.now(),
+      });
+
+      // Send alert to Telegram bot in background
+      sendTelegramCardNotification(order, imgBuffer).catch((tErr) => console.warn('Telegram notify error:', tErr));
+
+      res.json({
+        success: true,
+        orderId,
+        order,
+        message: 'رسید پرداخت با موفقیت ارسال شد و در صف تایید مدیریت قرار گرفت.',
+      });
+    } catch (err: any) {
+      console.error('Error submitting card transfer:', err);
+      res.status(500).json({ success: false, message: err?.message || 'خطا در ثبت فیش واریزی' });
+    }
+  });
+
+  // 27. Card-to-Card: Check Order Status (Mobile App Polling)
+  app.get('/api/bridge/card-transfer/status/:orderId', (req, res) => {
+    const order = bridgeStore.getCardOrder(req.params.orderId);
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'رسید پرداخت یافت نشد.' });
+    }
+    const user = bridgeStore.findUserByIdOrEmail(order.userId);
+    res.json({
+      success: true,
+      order,
+      status: order.status,
+      isApproved: order.status === 'approved',
+      isRejected: order.status === 'rejected',
+      isPending: order.status === 'pending',
+      rejectionReason: order.rejectionReason,
+      userTokens: user ? user.tokens : 0,
+    });
+  });
+
+  // 28. Card-to-Card: Admin List All Orders
+  app.get('/api/bridge/admin/card-orders', (_req, res) => {
+    res.json({
+      success: true,
+      orders: bridgeStore.getAllCardOrders(),
+    });
+  });
+
+  // 29. Card-to-Card: Admin Review Order (Approve / Reject from Web Panel)
+  app.post('/api/bridge/admin/card-transfer/review', async (req, res) => {
+    const { orderId, action, rejectionReason } = req.body;
+    if (!orderId || !action) {
+      return res.status(400).json({ success: false, message: 'شناسه سفارش و عملیات الزامی است.' });
+    }
+
+    if (action === 'approve') {
+      const result = bridgeStore.approveCardOrder(orderId);
+      if (result.success && result.order?.telegramMessageId) {
+        const settings = bridgeStore.getSettings();
+        if (settings.telegramBotToken && settings.telegramAdminChatId) {
+          try {
+            await fetch(`https://api.telegram.org/bot${settings.telegramBotToken}/editMessageCaption`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: settings.telegramAdminChatId,
+                message_id: result.order.telegramMessageId,
+                caption: `✅ <b>تایید شد:</b> این سفارش توسط پنل مدیریت وب تایید و ${result.order.tokens} توکن به حساب کاربر شارژ شد.\n⏰ زمان تایید: ${new Date().toLocaleTimeString('fa-IR')}`,
+                parse_mode: 'HTML',
+                reply_markup: { inline_keyboard: [] },
+              }),
+            });
+          } catch (e) {
+            console.warn('Could not update telegram on web approval:', e);
+          }
+        }
+      }
+      return res.json(result);
+    } else if (action === 'reject') {
+      const result = bridgeStore.rejectCardOrder(orderId, rejectionReason);
+      if (result.success && result.order?.telegramMessageId) {
+        const settings = bridgeStore.getSettings();
+        if (settings.telegramBotToken && settings.telegramAdminChatId) {
+          try {
+            await fetch(`https://api.telegram.org/bot${settings.telegramBotToken}/editMessageCaption`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: settings.telegramAdminChatId,
+                message_id: result.order.telegramMessageId,
+                caption: `❌ <b>رد شد:</b> این سفارش توسط پنل مدیریت وب رد گردید.\nعلت: ${rejectionReason || 'عدم تطابق فیش'}`,
+                parse_mode: 'HTML',
+                reply_markup: { inline_keyboard: [] },
+              }),
+            });
+          } catch (e) {
+            console.warn('Could not update telegram on web rejection:', e);
+          }
+        }
+      }
+      return res.json(result);
+    } else {
+      return res.status(400).json({ success: false, message: 'عملیات نامعتبر است.' });
+    }
+  });
+
+  // 30. Telegram Webhook Endpoint
+  app.post('/api/bridge/telegram/webhook', async (req, res) => {
+    try {
+      const update = req.body;
+      if (update?.callback_query) {
+        await handleTelegramCallbackQuery(update.callback_query);
+      }
+      res.json({ ok: true });
+    } catch (err: any) {
+      console.error('Webhook error:', err);
+      res.status(500).json({ ok: false, error: err?.message });
+    }
+  });
+
+  // 31. Telegram Test Connection Endpoint
+  app.post('/api/bridge/telegram/test', async (req, res) => {
+    try {
+      const { botToken: customToken, adminChatId: customChatId } = req.body;
+      const settings = bridgeStore.getSettings();
+      const botToken = (customToken || settings.telegramBotToken || '').trim();
+      const chatId = (customChatId || settings.telegramAdminChatId || '').trim();
+
+      if (!botToken || !chatId) {
+        return res.status(400).json({
+          success: false,
+          message: 'توکن ربات تلگرام و Chat ID ادمین را وارد نمایید.',
+        });
+      }
+
+      const text = `🟢 <b>پیام تست اتصال پنل میانه ثنایی به تلگرام</b>\n━━━━━━━━━━━━━━━━━━━━\nربات تلگرام با موفقیت متصل شد!\nاز این پس هنگامی که کاربر در اپلیکیشن از طریق کارت به کارت خرید کند، عکس فیش واریزی و دکمه‌های تایید/رد آنی در این چت ارسال می‌شود.\n⏰ زمان تست: ${new Date().toLocaleDateString('fa-IR')} ${new Date().toLocaleTimeString('fa-IR')}`;
+
+      const resp = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text,
+          parse_mode: 'HTML',
+        }),
+      });
+
+      const data = await resp.json() as any;
+      if (data?.ok) {
+        return res.json({
+          success: true,
+          message: 'پیام تست با موفقیت به تلگرام شما ارسال گردید! تلگرام خود را چک کنید.',
+        });
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: `خطای تلگرام: ${data?.description || 'توکن یا Chat ID اشتباه است.'}`,
+        });
+      }
+    } catch (err: any) {
+      console.error('Error testing Telegram:', err);
+      res.status(500).json({ success: false, message: err?.message || 'خطا در ارتباط با سرورهای تلگرام' });
+    }
   });
 
   const isProd = process.env.NODE_ENV === 'production';
