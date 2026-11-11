@@ -131,6 +131,7 @@ export interface BridgeSettings {
   sanaeiPassword: string;
   allowInsecure: boolean;
   plans: BridgePlan[];
+  walletPackages?: BridgeWalletPackage[];
   giftCodes?: BridgeGiftCode[];
   zibalMerchant: string;
   zibalEnabled: boolean;

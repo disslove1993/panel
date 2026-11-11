@@ -221,6 +221,60 @@ var BridgeStoreManager = class {
     }
     return false;
   }
+  // --- Wallet Packages CRUD ---
+  getWalletPackages() {
+    if (!this.data.settings.walletPackages || this.data.settings.walletPackages.length === 0) {
+      this.data.settings.walletPackages = [...WALLET_PACKAGES];
+    }
+    return this.data.settings.walletPackages;
+  }
+  getWalletPackageById(packageId) {
+    return this.getWalletPackages().find((p) => p.id === packageId);
+  }
+  addWalletPackage(pkg) {
+    const list = this.getWalletPackages();
+    const exists = list.find((p) => p.id === pkg.id);
+    if (exists) {
+      Object.assign(exists, pkg);
+    } else {
+      list.push(pkg);
+    }
+    this.data.settings.walletPackages = list;
+    this.saveToDisk();
+    return pkg;
+  }
+  updateWalletPackage(packageId, partial) {
+    const list = this.getWalletPackages();
+    const pkg = list.find((p) => p.id === packageId);
+    if (!pkg) return void 0;
+    Object.assign(pkg, partial);
+    this.data.settings.walletPackages = list;
+    this.saveToDisk();
+    return pkg;
+  }
+  deleteWalletPackage(packageId) {
+    const list = this.getWalletPackages();
+    const initialLen = list.length;
+    this.data.settings.walletPackages = list.filter((p) => p.id !== packageId);
+    if (this.data.settings.walletPackages.length !== initialLen) {
+      this.saveToDisk();
+      return true;
+    }
+    return false;
+  }
+  deleteGiftCode(codeOrId) {
+    if (!this.data.settings.giftCodes) return false;
+    const clean = codeOrId.trim().toUpperCase();
+    const initialLen = this.data.settings.giftCodes.length;
+    this.data.settings.giftCodes = this.data.settings.giftCodes.filter(
+      (g) => g.id !== codeOrId && g.code.toUpperCase() !== clean
+    );
+    if (this.data.settings.giftCodes.length !== initialLen) {
+      this.saveToDisk();
+      return true;
+    }
+    return false;
+  }
   getAllUsers() {
     return Object.values(this.data.users).sort((a, b) => b.registeredAt - a.registeredAt);
   }
@@ -2344,7 +2398,7 @@ async function startServer() {
     const settings = bridgeStore.getSettings();
     res.json({
       success: true,
-      packages: WALLET_PACKAGES,
+      packages: bridgeStore.getWalletPackages(),
       zibal: {
         enabled: settings.zibalEnabled ?? true,
         merchantConfigured: !!settings.zibalMerchant
@@ -2543,7 +2597,7 @@ ${statusText}`;
       let tokens = 100;
       let amountTomans = 1e4;
       if (packageId) {
-        const pack = WALLET_PACKAGES.find((p) => p.id === packageId);
+        const pack = bridgeStore.getWalletPackageById(packageId);
         if (pack) {
           tokens = pack.tokens + (pack.bonusTokens || 0);
           amountTomans = pack.priceTomans;

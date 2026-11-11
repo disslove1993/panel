@@ -8,6 +8,7 @@ import {
   BridgeGiftCode,
   BridgePaymentOrder,
   BridgeCardTransferOrder,
+  BridgeWalletPackage,
 } from './src/types/bridge';
 
 
@@ -238,6 +239,66 @@ class BridgeStoreManager {
     const initialLen = this.data.settings.plans.length;
     this.data.settings.plans = this.data.settings.plans.filter((p) => p.id !== planId);
     if (this.data.settings.plans.length !== initialLen) {
+      this.saveToDisk();
+      return true;
+    }
+    return false;
+  }
+
+  // --- Wallet Packages CRUD ---
+  getWalletPackages(): BridgeWalletPackage[] {
+    if (!this.data.settings.walletPackages || this.data.settings.walletPackages.length === 0) {
+      this.data.settings.walletPackages = [...WALLET_PACKAGES];
+    }
+    return this.data.settings.walletPackages;
+  }
+
+  getWalletPackageById(packageId: string): BridgeWalletPackage | undefined {
+    return this.getWalletPackages().find((p) => p.id === packageId);
+  }
+
+  addWalletPackage(pkg: BridgeWalletPackage): BridgeWalletPackage {
+    const list = this.getWalletPackages();
+    const exists = list.find((p) => p.id === pkg.id);
+    if (exists) {
+      Object.assign(exists, pkg);
+    } else {
+      list.push(pkg);
+    }
+    this.data.settings.walletPackages = list;
+    this.saveToDisk();
+    return pkg;
+  }
+
+  updateWalletPackage(packageId: string, partial: Partial<BridgeWalletPackage>): BridgeWalletPackage | undefined {
+    const list = this.getWalletPackages();
+    const pkg = list.find((p) => p.id === packageId);
+    if (!pkg) return undefined;
+    Object.assign(pkg, partial);
+    this.data.settings.walletPackages = list;
+    this.saveToDisk();
+    return pkg;
+  }
+
+  deleteWalletPackage(packageId: string): boolean {
+    const list = this.getWalletPackages();
+    const initialLen = list.length;
+    this.data.settings.walletPackages = list.filter((p) => p.id !== packageId);
+    if (this.data.settings.walletPackages.length !== initialLen) {
+      this.saveToDisk();
+      return true;
+    }
+    return false;
+  }
+
+  deleteGiftCode(codeOrId: string): boolean {
+    if (!this.data.settings.giftCodes) return false;
+    const clean = codeOrId.trim().toUpperCase();
+    const initialLen = this.data.settings.giftCodes.length;
+    this.data.settings.giftCodes = this.data.settings.giftCodes.filter(
+      (g) => g.id !== codeOrId && g.code.toUpperCase() !== clean
+    );
+    if (this.data.settings.giftCodes.length !== initialLen) {
       this.saveToDisk();
       return true;
     }

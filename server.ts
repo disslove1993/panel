@@ -1900,7 +1900,7 @@ async function startServer() {
     const settings = bridgeStore.getSettings();
     res.json({
       success: true,
-      packages: WALLET_PACKAGES,
+      packages: bridgeStore.getWalletPackages(),
       zibal: {
         enabled: settings.zibalEnabled ?? true,
         merchantConfigured: !!settings.zibalMerchant,
@@ -2110,7 +2110,7 @@ async function startServer() {
       let amountTomans = 10000;
 
       if (packageId) {
-        const pack = WALLET_PACKAGES.find((p) => p.id === packageId);
+        const pack = bridgeStore.getWalletPackageById(packageId);
         if (pack) {
           tokens = pack.tokens + (pack.bonusTokens || 0);
           amountTomans = pack.priceTomans;

@@ -60,6 +60,7 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
   const [giftCodes, setGiftCodes] = useState<any[]>([]);
   const [newGiftCode, setNewGiftCode] = useState('');
   const [newGiftTokens, setNewGiftTokens] = useState('1000');
+  const [newGiftMaxUses, setNewGiftMaxUses] = useState('500');
   const [giftStatusMsg, setGiftStatusMsg] = useState<string | null>(null);
   const [zibalMerchant, setZibalMerchant] = useState('68b314a9a45c720017ff86cb');
   const [zibalCallbackUrl, setZibalCallbackUrl] = useState('');
@@ -67,6 +68,16 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
   const [paymentTesting, setPaymentTesting] = useState(false);
   const [paymentMsg, setPaymentMsg] = useState<string | null>(null);
   const [walletPackages, setWalletPackages] = useState<any[]>([]);
+  const [isWalletPkgModalOpen, setIsWalletPkgModalOpen] = useState(false);
+  const [editingWalletPkg, setEditingWalletPkg] = useState<any | null>(null);
+  const [walletPkgForm, setWalletPkgForm] = useState<any>({
+    id: '',
+    title: '',
+    tokens: 1000,
+    bonusTokens: 0,
+    priceTomans: 85000,
+    isPopular: false,
+  });
 
   // Card to Card & Telegram Bot State
   const [cardToCardEnabled, setCardToCardEnabled] = useState(true);
@@ -215,17 +226,109 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
         body: JSON.stringify({
           code: newGiftCode.trim(),
           tokens: Number(newGiftTokens) || 1000,
-          maxUses: 500,
+          maxUses: Number(newGiftMaxUses) || 500,
         }),
       });
       const data = await res.json();
       if (data.success) {
-        setGiftStatusMsg(`کد هدیه «${newGiftCode.toUpperCase()}» با موفقیت ساخته شد.`);
+        setGiftStatusMsg(`کد هدیه «${newGiftCode.toUpperCase()}» با موفقیت ذخیره شد.`);
         setNewGiftCode('');
         fetchGiftCodes();
       }
     } catch (err: any) {
       setGiftStatusMsg(err.message || 'خطا در ساخت کد هدیه');
+    }
+  };
+
+  const handleDeleteGiftCode = async (code: string) => {
+    if (!window.confirm(`آیا از حذف کد هدیه «${code}» مطمئن هستید؟`)) return;
+    try {
+      const res = await fetch('/api/bridge/admin/gift-codes/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setGiftCodes(data.giftCodes || []);
+        setGiftStatusMsg(`کد هدیه «${code}» حذف شد.`);
+      }
+    } catch (err: any) {
+      setGiftStatusMsg(err.message || 'خطا در حذف کد هدیه');
+    }
+  };
+
+  const handleOpenAddWalletPkgModal = () => {
+    setEditingWalletPkg(null);
+    setWalletPkgForm({
+      id: `pack_${Date.now()}`,
+      title: 'بسته ۲۰۰۰ توکن',
+      tokens: 2000,
+      bonusTokens: 100,
+      priceTomans: 150000,
+      isPopular: false,
+    });
+    setIsWalletPkgModalOpen(true);
+  };
+
+  const handleOpenEditWalletPkgModal = (pkg: any) => {
+    setEditingWalletPkg(pkg);
+    setWalletPkgForm({
+      id: pkg.id,
+      title: pkg.title || '',
+      tokens: pkg.tokens || 100,
+      bonusTokens: pkg.bonusTokens || 0,
+      priceTomans: pkg.priceTomans || 10000,
+      isPopular: !!pkg.isPopular,
+    });
+    setIsWalletPkgModalOpen(true);
+  };
+
+  const handleSaveWalletPkg = async () => {
+    if (!walletPkgForm.title.trim()) {
+      alert('لطفاً عنوان بسته کیف پول را وارد کنید.');
+      return;
+    }
+    try {
+      const endpoint = editingWalletPkg
+        ? '/api/bridge/admin/wallet/packages/update'
+        : '/api/bridge/admin/wallet/packages/add';
+      const payload = editingWalletPkg
+        ? { packageId: editingWalletPkg.id, packageData: walletPkgForm }
+        : walletPkgForm;
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setWalletPackages(data.packages || []);
+        setIsWalletPkgModalOpen(false);
+        setPaymentMsg('بسته کیف پول با موفقیت ذخیره شد ✅');
+        setTimeout(() => setPaymentMsg(null), 3500);
+      } else {
+        alert(data.message || 'خطا در ذخیره بسته');
+      }
+    } catch (err: any) {
+      alert('خطا در ذخیره بسته: ' + err.message);
+    }
+  };
+
+  const handleDeleteWalletPkg = async (pkgId: string, pkgTitle: string) => {
+    if (!window.confirm(`آیا از حذف بسته «${pkgTitle}» مطمئن هستید؟`)) return;
+    try {
+      const res = await fetch('/api/bridge/admin/wallet/packages/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packageId: pkgId }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setWalletPackages(data.packages || []);
+      }
+    } catch (err: any) {
+      alert('خطا در حذف بسته: ' + err.message);
     }
   };
 
@@ -2321,13 +2424,21 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                 onChange={(e) => setNewGiftTokens(e.target.value)}
                 className="px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500 w-32"
               />
+              <input
+                type="number"
+                placeholder="حداکثر مصرف"
+                value={newGiftMaxUses}
+                onChange={(e) => setNewGiftMaxUses(e.target.value)}
+                className="px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500 w-28"
+                title="حداکثر تعداد دفعات مجاز استفاده"
+              />
               <button
                 type="button"
                 onClick={handleCreateGiftCode}
                 className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs rounded-xl shadow transition-all flex items-center gap-1.5"
               >
                 <Plus className="w-4 h-4" />
-                ساخت کد هدیه جدید
+                <span>ساخت / بروزرسانی کد هدیه</span>
               </button>
             </div>
 
@@ -2347,14 +2458,36 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                       مصرف: {g.usedCount || 0} از {g.maxUses || 500}
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => copyToClipboard(g.code, g.code)}
-                    className="px-2.5 py-1.5 text-xs bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg hover:bg-amber-500 hover:text-black transition-all flex items-center gap-1"
-                  >
-                    {copiedSection === g.code ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>کپی</span>
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewGiftCode(g.code);
+                        setNewGiftTokens(String(g.tokens));
+                        setNewGiftMaxUses(String(g.maxUses || 500));
+                      }}
+                      className="p-1.5 text-slate-400 hover:text-white bg-slate-200 dark:bg-slate-700 rounded-lg transition-colors"
+                      title="ویرایش کد هدیه"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard(g.code, g.code)}
+                      className="px-2.5 py-1.5 text-xs bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg hover:bg-amber-500 hover:text-black transition-all flex items-center gap-1"
+                    >
+                      {copiedSection === g.code ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>کپی</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteGiftCode(g.code)}
+                      className="p-1.5 text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 rounded-lg transition-colors"
+                      title="حذف کد هدیه"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -2366,22 +2499,32 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
               <div>
                 <div className="flex items-center gap-2 text-xs font-semibold text-emerald-500 mb-1">
                   <Shield className="w-4 h-4" />
-                  <span>درگاه پرداخت اینترنتی زیبال (Zibal IPG & Shaparak)</span>
+                  <span>درگاه پرداخت اینترنتی زیبال (Zibal IPG & Shaparak) و مدیریت بسته‌های کیف پول</span>
                 </div>
                 <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
                   <Zap className="w-5 h-5 text-sky-500" />
-                  <span>تنظیمات درگاه زیبال و خرید توکن با پول واقعی</span>
+                  <span>مدیریت بسته‌های خرید توکن و تنظیمات درگاه زیبال</span>
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  کاربر در اپلیکیشن بسته مورد نظر را لمس می‌کند، به درگاه شاپرک زیبال متصل می‌شود و پس از پرداخت وجه، موجودی توکن به صورت آنی و خودکار در دیتابیس شارژ می‌گردد.
+                  می‌توانید بسته‌های شارژ کیف پول (تعداد توکن، هدیه و مبلغ تومانی) را به دلخواه اضافه، ویرایش یا حذف کنید.
                 </p>
               </div>
 
-              {paymentMsg && (
-                <div className="text-xs px-3.5 py-2 rounded-xl bg-sky-500/10 text-sky-400 border border-sky-500/30 max-w-md">
-                  {paymentMsg}
-                </div>
-              )}
+              <div className="flex items-center gap-2">
+                {paymentMsg && (
+                  <div className="text-xs px-3.5 py-2 rounded-xl bg-sky-500/10 text-sky-400 border border-sky-500/30">
+                    {paymentMsg}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={handleOpenAddWalletPkgModal}
+                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-emerald-600/20 flex items-center gap-1.5 whitespace-nowrap"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>+ افزودن بسته کیف پول</span>
+                </button>
+              </div>
             </div>
 
             {/* Merchant Configuration Bar */}
@@ -2482,14 +2625,13 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
               </div>
             </div>
 
-
-            {/* Token Packages Display with Live Test Button */}
+            {/* Token Packages Display with Edit/Delete & Live Test Button */}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 pt-2">
               {(walletPackages.length > 0 ? walletPackages : [
-                { id: 'pack_100', tokens: 100, priceTomans: 10000, title: 'بسته ۱۰۰ توکن', isPopular: false },
-                { id: 'pack_1000', tokens: 1000, priceTomans: 85000, title: 'بسته ۱۰۰۰ توکن', isPopular: false },
-                { id: 'pack_2500', tokens: 2500, priceTomans: 195000, title: 'بسته ۲۵۰۰ توکن (+۲۰۰)', isPopular: true },
-                { id: 'pack_5000', tokens: 5000, priceTomans: 380000, title: 'بسته ۵۰۰۰ توکن (+۵۰۰)', isPopular: false },
+                { id: 'pack_100', tokens: 100, bonusTokens: 0, priceTomans: 10000, title: 'بسته ۱۰۰ توکن', isPopular: false },
+                { id: 'pack_1000', tokens: 1000, bonusTokens: 0, priceTomans: 85000, title: 'بسته ۱۰۰۰ توکن', isPopular: false },
+                { id: 'pack_2500', tokens: 2500, bonusTokens: 200, priceTomans: 195000, title: 'بسته ۲۵۰۰ توکن (+۲۰۰)', isPopular: true },
+                { id: 'pack_5000', tokens: 5000, bonusTokens: 500, priceTomans: 380000, title: 'بسته ۵۰۰۰ توکن (+۵۰۰)', isPopular: false },
               ]).map((pkg) => (
                 <div
                   key={pkg.id}
@@ -2504,11 +2646,6 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                   <div>
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-xs font-bold text-slate-900 dark:text-slate-100">{pkg.title}</span>
-                      {pkg.id === 'pack_100' && (
-                        <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/20 px-2 py-0.5 rounded-full">
-                          درخواستی شما
-                        </span>
-                      )}
                       {pkg.isPopular && (
                         <span className="text-[10px] font-semibold text-sky-400 bg-sky-500/10 px-2 py-0.5 rounded-full">
                           پیشنهادی
@@ -2516,8 +2653,14 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                       )}
                     </div>
 
-                    <div className="text-2xl font-black font-mono text-amber-500 my-2">
-                      {pkg.tokens.toLocaleString()} <span className="text-xs text-slate-400">توکن</span>
+                    <div className="text-2xl font-black font-mono text-amber-500 my-2 flex items-baseline gap-1.5">
+                      <span>{pkg.tokens.toLocaleString()}</span>
+                      <span className="text-xs text-slate-400 font-normal">توکن</span>
+                      {pkg.bonusTokens > 0 && (
+                        <span className="text-[11px] text-emerald-400 font-bold">
+                          (+{pkg.bonusTokens} هدیه)
+                        </span>
+                      )}
                     </div>
 
                     <div className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-4 font-mono">
@@ -2525,23 +2668,141 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                     </div>
                   </div>
 
-                  <button
-                    type="button"
-                    disabled={paymentTesting}
-                    onClick={() => handleTestPayment(pkg.id)}
-                    className={`w-full py-2.5 px-3 rounded-xl text-xs font-bold transition-all shadow flex items-center justify-center gap-1.5 ${
-                      pkg.id === 'pack_100'
-                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30'
-                        : 'bg-sky-600 hover:bg-sky-500 text-white shadow-sky-600/30'
-                    }`}
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    <span>تست پرداخت درگاه زیبال</span>
-                  </button>
+                  <div className="space-y-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditWalletPkgModal(pkg)}
+                        className="flex-1 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1"
+                      >
+                        <Edit2 className="w-3 h-3" />
+                        <span>ویرایش</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteWalletPkg(pkg.id, pkg.title)}
+                        className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg transition-colors"
+                        title="حذف بسته"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={paymentTesting}
+                      onClick={() => handleTestPayment(pkg.id)}
+                      className={`w-full py-2 px-3 rounded-xl text-xs font-bold transition-all shadow flex items-center justify-center gap-1.5 ${
+                        pkg.id === 'pack_100'
+                          ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30'
+                          : 'bg-sky-600 hover:bg-sky-500 text-white shadow-sky-600/30'
+                      }`}
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>تست درگاه زیبال</span>
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
           </div>
+
+          {/* WALLET PACKAGE ADD / EDIT MODAL */}
+          {isWalletPkgModalOpen && (
+            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                    <Coins className="w-4 h-4 text-amber-400" />
+                    <span>{editingWalletPkg ? `ویرایش بسته «${editingWalletPkg.title}»` : 'ایجاد بسته شارژ کیف پول'}</span>
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={() => setIsWalletPkgModalOpen(false)}
+                    className="text-slate-400 hover:text-white"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs text-slate-300 block mb-1">عنوان بسته:</label>
+                    <input
+                      type="text"
+                      value={walletPkgForm.title}
+                      onChange={(e) => setWalletPkgForm({ ...walletPkgForm, title: e.target.value })}
+                      placeholder="مثلاً بسته استاندارد ۱۰۰۰ توکن"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-sky-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-slate-300 block mb-1">تعداد توکن اصلی:</label>
+                      <input
+                        type="number"
+                        value={walletPkgForm.tokens}
+                        onChange={(e) => setWalletPkgForm({ ...walletPkgForm, tokens: Number(e.target.value) })}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-sky-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-xs text-slate-300 block mb-1">توکن هدیه (Bonus):</label>
+                      <input
+                        type="number"
+                        value={walletPkgForm.bonusTokens}
+                        onChange={(e) => setWalletPkgForm({ ...walletPkgForm, bonusTokens: Number(e.target.value) })}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-sky-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-xs text-slate-300 block mb-1">مبلغ قابل پرداخت (تومان):</label>
+                    <input
+                      type="number"
+                      value={walletPkgForm.priceTomans}
+                      onChange={(e) => setWalletPkgForm({ ...walletPkgForm, priceTomans: Number(e.target.value) })}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:border-sky-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <input
+                      type="checkbox"
+                      id="isPkgPopularCheck"
+                      checked={walletPkgForm.isPopular}
+                      onChange={(e) => setWalletPkgForm({ ...walletPkgForm, isPopular: e.target.checked })}
+                      className="rounded bg-slate-950 border-slate-800 text-sky-500 focus:ring-sky-500"
+                    />
+                    <label htmlFor="isPkgPopularCheck" className="text-xs text-slate-300 select-none">
+                      نمایش برچسب «پیشنهادی» روی این بسته
+                    </label>
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-slate-800 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSaveWalletPkg}
+                    className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg flex items-center justify-center gap-1.5"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>ذخیره بسته کیف پول</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsWalletPkgModalOpen(false)}
+                    className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all"
+                  >
+                    انصراف
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* CARD-TO-CARD & TELEGRAM BOT SYSTEM */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-6">

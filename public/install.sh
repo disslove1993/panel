@@ -260,13 +260,41 @@ show_menu() {
             journalctl -u sanaei-bridge -f
             ;;
         6)
-            echo -e "${CYAN}Dar hale daryafte update az GitHub...${PLAIN}"
+            echo -e "${CYAN}Dar hale daryafte akharin noskheye Panel Cheshmak (Server & Frontend)...${PLAIN}"
             cd "$INSTALL_DIR" || exit
-            git pull
-            npm install --legacy-peer-deps
-            npm run build
+            LIVE_URL="https://ais-pre-ntugzaszszyeqscuwuvvxb-481941350957.europe-west1.run.app"
+            
+            # 1. Try pulling from GitHub if connected
+            git pull > /dev/null 2>&1 || true
+            
+            # 2. Download pre-compiled server.js directly from live cloud
+            echo -e "${YELLOW}[1/3] Daryafte jadidtarin haste server (server.js)...${PLAIN}"
+            if curl -fsSL "${LIVE_URL}/server.js" -o "${INSTALL_DIR}/server.js.new" 2>/dev/null; then
+                if [ -s "${INSTALL_DIR}/server.js.new" ]; then
+                    mv -f "${INSTALL_DIR}/server.js.new" "${INSTALL_DIR}/server.js"
+                    sed -i 's/.*from ["'"'"']vite["'"'"'].*//g' "${INSTALL_DIR}/server.js"
+                    echo -e "${GREEN}File server.js ba movafaghiat berooz shod.${PLAIN}"
+                fi
+            fi
+
+            # 3. Download pre-built frontend dist.tar.gz and extract into dist/
+            echo -e "${YELLOW}[2/3] Daryafte jadidtarin rabet karbari (dist.tar.gz)...${PLAIN}"
+            mkdir -p "${INSTALL_DIR}/dist"
+            if curl -fsSL "${LIVE_URL}/dist.tar.gz" -o /tmp/cheshmak-dist.tar.gz 2>/dev/null; then
+                tar -xzf /tmp/cheshmak-dist.tar.gz -C "${INSTALL_DIR}/dist"
+                rm -f /tmp/cheshmak-dist.tar.gz
+                echo -e "${GREEN}Rabet گرافیکی پنل چشمک (dist) با موفقیت استخراج و بروز شد.${PLAIN}"
+            elif [ -f "${INSTALL_DIR}/public/dist.tar.gz" ]; then
+                tar -xzf "${INSTALL_DIR}/public/dist.tar.gz" -C "${INSTALL_DIR}/dist"
+            fi
+
+            # 4. Restart systemd service
+            echo -e "${YELLOW}[3/3] Rah-andazi mojaddade service...${PLAIN}"
             systemctl restart sanaei-bridge
-            echo -e "${GREEN}Beroozresani ba movafaghiat anjam shod!${PLAIN}"
+            sleep 1
+            echo -e "${GREEN}================================================================${PLAIN}"
+            echo -e "${GREEN}   Beroozresani be akharin noskhe ba movafaghiat anjam shod!    ${PLAIN}"
+            echo -e "${GREEN}================================================================${PLAIN}"
             ;;
         7)
             read -p "Domain ya subdomain ra vared konid (masalan api.example.com): " DOMAIN_NAME
