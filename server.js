@@ -1316,13 +1316,35 @@ async function startServer() {
   }
   app.use("/uploads", express.static(path2.resolve(__dirname, "public/uploads")));
   app.get("/install.sh", (_req, res) => {
-    const installScriptPath = path2.resolve(__dirname, "install.sh");
+    const p1 = path2.resolve(__dirname, "public/install.sh");
+    const p2 = path2.resolve(__dirname, "install.sh");
+    const installScriptPath = fs2.existsSync(p1) ? p1 : p2;
     if (fs2.existsSync(installScriptPath)) {
       res.setHeader("Content-Type", "text/x-shellscript; charset=utf-8");
       res.setHeader("Cache-Control", "no-cache");
       return res.sendFile(installScriptPath);
     }
     res.status(404).send("install.sh not found");
+  });
+  app.get("/sanaei-bridge.sh", (_req, res) => {
+    const cliPath = path2.resolve(__dirname, "public/sanaei-bridge.sh");
+    if (fs2.existsSync(cliPath)) {
+      res.setHeader("Content-Type", "text/x-shellscript; charset=utf-8");
+      res.setHeader("Cache-Control", "no-cache");
+      return res.sendFile(cliPath);
+    }
+    res.status(404).send("sanaei-bridge.sh not found");
+  });
+  app.get("/server.js", (_req, res) => {
+    const s1 = path2.resolve(__dirname, "public/server.js");
+    const s2 = path2.resolve(__dirname, "server.js");
+    const serverBundlePath = fs2.existsSync(s1) ? s1 : s2;
+    if (fs2.existsSync(serverBundlePath)) {
+      res.setHeader("Content-Type", "application/javascript; charset=utf-8");
+      res.setHeader("Cache-Control", "no-cache");
+      return res.sendFile(serverBundlePath);
+    }
+    res.status(404).send("server.js not found");
   });
   app.get("/source.tar.gz", (_req, res) => {
     try {
@@ -2363,7 +2385,10 @@ async function startServer() {
       bankCardOwner,
       bankName,
       telegramBotToken,
-      telegramAdminChatId
+      telegramAdminChatId,
+      plans,
+      walletPackages,
+      giftCodes
     } = req.body;
     const parsedWelcomeTokens = welcomeTokens !== void 0 ? Math.max(0, Number(welcomeTokens)) : void 0;
     const parsedTrialGB = freeTrialTrafficGB !== void 0 ? Math.max(0, Number(freeTrialTrafficGB)) : void 0;
@@ -2380,7 +2405,10 @@ async function startServer() {
       ...bankCardOwner !== void 0 ? { bankCardOwner: String(bankCardOwner).trim() } : {},
       ...bankName !== void 0 ? { bankName: String(bankName).trim() } : {},
       ...telegramBotToken !== void 0 ? { telegramBotToken: String(telegramBotToken).trim() } : {},
-      ...telegramAdminChatId !== void 0 ? { telegramAdminChatId: String(telegramAdminChatId).trim() } : {}
+      ...telegramAdminChatId !== void 0 ? { telegramAdminChatId: String(telegramAdminChatId).trim() } : {},
+      ...Array.isArray(plans) ? { plans } : {},
+      ...Array.isArray(walletPackages) ? { walletPackages } : {},
+      ...Array.isArray(giftCodes) ? { giftCodes } : {}
     });
     if (parsedTrialGB !== void 0 || parsedTrialDays !== void 0) {
       const trialPlan = bridgeStore.getPlanById("plan_free_trial");

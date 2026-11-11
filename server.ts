@@ -629,13 +629,39 @@ async function startServer() {
 
   // Direct Install Script for VPS
   app.get('/install.sh', (_req, res) => {
-    const installScriptPath = path.resolve(__dirname, 'install.sh');
+    const p1 = path.resolve(__dirname, 'public/install.sh');
+    const p2 = path.resolve(__dirname, 'install.sh');
+    const installScriptPath = fs.existsSync(p1) ? p1 : p2;
     if (fs.existsSync(installScriptPath)) {
       res.setHeader('Content-Type', 'text/x-shellscript; charset=utf-8');
       res.setHeader('Cache-Control', 'no-cache');
       return res.sendFile(installScriptPath);
     }
     res.status(404).send('install.sh not found');
+  });
+
+  // Direct CLI Menu Script for VPS
+  app.get('/sanaei-bridge.sh', (_req, res) => {
+    const cliPath = path.resolve(__dirname, 'public/sanaei-bridge.sh');
+    if (fs.existsSync(cliPath)) {
+      res.setHeader('Content-Type', 'text/x-shellscript; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache');
+      return res.sendFile(cliPath);
+    }
+    res.status(404).send('sanaei-bridge.sh not found');
+  });
+
+  // Direct Pre-compiled Backend Server Bundle for VPS
+  app.get('/server.js', (_req, res) => {
+    const s1 = path.resolve(__dirname, 'public/server.js');
+    const s2 = path.resolve(__dirname, 'server.js');
+    const serverBundlePath = fs.existsSync(s1) ? s1 : s2;
+    if (fs.existsSync(serverBundlePath)) {
+      res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache');
+      return res.sendFile(serverBundlePath);
+    }
+    res.status(404).send('server.js not found');
   });
 
   // Direct Source Bundle endpoint for VPS installer
@@ -1859,6 +1885,9 @@ async function startServer() {
       bankName,
       telegramBotToken,
       telegramAdminChatId,
+      plans,
+      walletPackages,
+      giftCodes,
     } = req.body;
 
     const parsedWelcomeTokens = welcomeTokens !== undefined ? Math.max(0, Number(welcomeTokens)) : undefined;
@@ -1878,6 +1907,9 @@ async function startServer() {
       ...(bankName !== undefined ? { bankName: String(bankName).trim() } : {}),
       ...(telegramBotToken !== undefined ? { telegramBotToken: String(telegramBotToken).trim() } : {}),
       ...(telegramAdminChatId !== undefined ? { telegramAdminChatId: String(telegramAdminChatId).trim() } : {}),
+      ...(Array.isArray(plans) ? { plans } : {}),
+      ...(Array.isArray(walletPackages) ? { walletPackages } : {}),
+      ...(Array.isArray(giftCodes) ? { giftCodes } : {}),
     });
 
     // Also sync the free trial plan if trial settings changed
