@@ -1,3 +1,22 @@
+export interface BridgeWalletTransaction {
+  id: string;
+  userId: string;
+  type: 'welcome' | 'gift_code' | 'topup' | 'purchase' | 'admin_adjust';
+  amountTokens: number;
+  description: string;
+  createdAt: number;
+}
+
+export interface BridgeGiftCode {
+  id: string;
+  code: string;
+  tokens: number;
+  maxUses: number;
+  usedCount: number;
+  isExpired: boolean;
+  createdAt: number;
+}
+
 export interface BridgePlan {
   id: string;
   name: string;
@@ -58,8 +77,18 @@ export interface BridgeServerItem {
   isOnline: boolean;
 }
 
+export interface BridgeWalletPackage {
+  id: string;
+  tokens: number;
+  priceTomans: number;
+  bonusTokens: number;
+  title: string;
+  isPopular?: boolean;
+}
+
 export interface BridgeSettings {
   apiKey: string;
+  adminPassword?: string;
   defaultInboundId: number;
   welcomeTokens: number;
   sanaeiPanelUrl: string;
@@ -68,4 +97,6 @@ export interface BridgeSettings {
   sanaeiPassword: string;
   allowInsecure: boolean;
   plans: BridgePlan[];
+  giftCodes?: BridgeGiftCode[];
 }
+

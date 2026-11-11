@@ -1,6 +1,12 @@
 import fs from 'fs';
 import path from 'path';
-import { BridgePlan, BridgeSettings, BridgeUser } from './src/types/bridge';
+import {
+  BridgePlan,
+  BridgeSettings,
+  BridgeUser,
+  BridgeWalletTransaction,
+  BridgeGiftCode,
+} from './src/types/bridge';
 
 const STORE_PATH = path.resolve(process.cwd(), 'bridge_store.json');
 
@@ -49,6 +55,7 @@ const DEFAULT_PLANS: BridgePlan[] = [
 
 const DEFAULT_SETTINGS: BridgeSettings = {
   apiKey: 'bridge_secret_key_2026',
+  adminPassword: 'admin',
   defaultInboundId: 4, // Inbound 4 (AI-Cloudflare-CDN)
   welcomeTokens: 1000, // 1000 Tokens given to new users by default (matching the app UI)
   sanaeiPanelUrl: 'https://panel.wpbaharak.ir:2053',
@@ -57,11 +64,60 @@ const DEFAULT_SETTINGS: BridgeSettings = {
   sanaeiPassword: '199300',
   allowInsecure: true,
   plans: DEFAULT_PLANS,
+  giftCodes: [
+    {
+      id: 'gift_welcome',
+      code: 'WELCOME2026',
+      tokens: 1000,
+      maxUses: 1000,
+      usedCount: 0,
+      isExpired: false,
+      createdAt: Date.now(),
+    },
+    {
+      id: 'gift_bonus',
+      code: 'FREE1000',
+      tokens: 1000,
+      maxUses: 500,
+      usedCount: 0,
+      isExpired: false,
+      createdAt: Date.now(),
+    },
+  ],
 };
+
+export const WALLET_PACKAGES = [
+  {
+    id: 'pack_1000',
+    tokens: 1000,
+    priceTomans: 85000,
+    bonusTokens: 0,
+    title: 'بسته پایه ۱۰۰۰ توکن',
+    isPopular: false,
+  },
+  {
+    id: 'pack_2500',
+    tokens: 2500,
+    priceTomans: 195000,
+    bonusTokens: 200,
+    title: 'بسته نقره‌ای ۲۵۰۰ توکن (+۲۰۰ هدیه)',
+    isPopular: true,
+  },
+  {
+    id: 'pack_5000',
+    tokens: 5000,
+    priceTomans: 380000,
+    bonusTokens: 500,
+    title: 'بسته طلایی ۵۰۰۰ توکن (+۵۰۰ هدیه)',
+    isPopular: false,
+  },
+];
 
 interface BridgeDatabase {
   settings: BridgeSettings;
   users: Record<string, BridgeUser>;
+  transactions?: BridgeWalletTransaction[];
+  redeemedCodes?: Record<string, string[]>; // code -> array of userIds
 }
 
 class BridgeStoreManager {
@@ -79,6 +135,8 @@ class BridgeStoreManager {
         return {
           settings: { ...DEFAULT_SETTINGS, ...(parsed.settings || {}) },
           users: parsed.users || {},
+          transactions: parsed.transactions || [],
+          redeemedCodes: parsed.redeemedCodes || {},
         };
       }
     } catch (err) {
@@ -87,6 +145,8 @@ class BridgeStoreManager {
     return {
       settings: DEFAULT_SETTINGS,
       users: {},
+      transactions: [],
+      redeemedCodes: {},
     };
   }
 
@@ -124,7 +184,10 @@ class BridgeStoreManager {
     if (!identifier) return undefined;
     const clean = identifier.trim().toLowerCase();
     return Object.values(this.data.users).find(
-      (u) => u.id === identifier || u.email.toLowerCase() === clean
+      (u) =>
+        u.id === identifier ||
+        u.email.toLowerCase() === clean ||
+        (u.deviceId && u.deviceId.toLowerCase() === clean)
     );
   }
 
@@ -137,11 +200,13 @@ class BridgeStoreManager {
 
     const id = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const now = Date.now();
+    const initialTokens = payload.initialTokens !== undefined ? payload.initialTokens : this.data.settings.welcomeTokens;
+
     const newUser: BridgeUser = {
       id,
       email,
       name: payload.name?.trim() || email.split('@')[0] || 'User',
-      tokens: payload.initialTokens !== undefined ? payload.initialTokens : this.data.settings.welcomeTokens,
+      tokens: initialTokens,
       deviceId: payload.deviceId || '',
       registeredAt: now,
       lastActiveAt: now,
@@ -168,6 +233,17 @@ class BridgeStoreManager {
     };
 
     this.data.users[id] = newUser;
+
+    // Record welcome bonus transaction
+    if (initialTokens > 0) {
+      this.addTransaction({
+        userId: id,
+        type: 'welcome',
+        amountTokens: initialTokens,
+        description: 'هدیه خوش‌آمدگویی و تست اپلیکیشن',
+      });
+    }
+
     this.saveToDisk();
     return newUser;
   }
@@ -186,6 +262,130 @@ class BridgeStoreManager {
     }
     return false;
   }
+
+  // --- Wallet & Transactions Management ---
+  addTransaction(item: { userId: string; type: BridgeWalletTransaction['type']; amountTokens: number; description: string }): BridgeWalletTransaction {
+    if (!this.data.transactions) this.data.transactions = [];
+    const tx: BridgeWalletTransaction = {
+      id: `tx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      userId: item.userId,
+      type: item.type,
+      amountTokens: item.amountTokens,
+      description: item.description,
+      createdAt: Date.now(),
+    };
+    this.data.transactions.unshift(tx);
+    // Keep max 1000 transactions
+    if (this.data.transactions.length > 1000) {
+      this.data.transactions = this.data.transactions.slice(0, 1000);
+    }
+    this.saveToDisk();
+    return tx;
+  }
+
+  getTransactions(userId?: string): BridgeWalletTransaction[] {
+    const list = this.data.transactions || [];
+    if (!userId) return list;
+    return list.filter((t) => t.userId === userId);
+  }
+
+  adjustUserTokens(userId: string, deltaTokens: number, type: BridgeWalletTransaction['type'], description: string): { success: boolean; user?: BridgeUser; message?: string } {
+    const user = this.findUserByIdOrEmail(userId);
+    if (!user) {
+      return { success: false, message: 'کاربر یافت نشد.' };
+    }
+    const newBalance = (user.tokens || 0) + deltaTokens;
+    if (newBalance < 0) {
+      return { success: false, message: 'موجودی توکن کاربر کافی نیست.' };
+    }
+    user.tokens = newBalance;
+    this.updateUser(user);
+    this.addTransaction({
+      userId: user.id,
+      type,
+      amountTokens: deltaTokens,
+      description,
+    });
+    return { success: true, user };
+  }
+
+  // --- Gift Codes Management ---
+  getGiftCodes(): BridgeGiftCode[] {
+    return this.data.settings.giftCodes || [];
+  }
+
+  createGiftCode(code: string, tokens: number, maxUses = 100): BridgeGiftCode {
+    if (!this.data.settings.giftCodes) this.data.settings.giftCodes = [];
+    const cleanCode = code.trim().toUpperCase();
+    const existing = this.data.settings.giftCodes.find((g) => g.code === cleanCode);
+    if (existing) {
+      existing.tokens = tokens;
+      existing.maxUses = maxUses;
+      existing.isExpired = false;
+      this.saveToDisk();
+      return existing;
+    }
+    const newGift: BridgeGiftCode = {
+      id: `gift_${Date.now()}`,
+      code: cleanCode,
+      tokens,
+      maxUses,
+      usedCount: 0,
+      isExpired: false,
+      createdAt: Date.now(),
+    };
+    this.data.settings.giftCodes.push(newGift);
+    this.saveToDisk();
+    return newGift;
+  }
+
+  redeemGiftCode(userId: string, rawCode: string): { success: boolean; tokensAdded: number; newTokens: number; message: string } {
+    const user = this.findUserByIdOrEmail(userId);
+    if (!user) {
+      return { success: false, tokensAdded: 0, newTokens: 0, message: 'کاربر یافت نشد.' };
+    }
+    const code = rawCode.trim().toUpperCase();
+    const gifts = this.getGiftCodes();
+    const gift = gifts.find((g) => g.code === code);
+    if (!gift) {
+      return { success: false, tokensAdded: 0, newTokens: user.tokens, message: 'کد هدیه نامعتبر است.' };
+    }
+    if (gift.isExpired || gift.usedCount >= gift.maxUses) {
+      return { success: false, tokensAdded: 0, newTokens: user.tokens, message: 'مهلت یا ظرفیت استفاده از این کد هدیه به پایان رسیده است.' };
+    }
+
+    if (!this.data.redeemedCodes) this.data.redeemedCodes = {};
+    const usedUsers = this.data.redeemedCodes[code] || [];
+    if (usedUsers.includes(user.id)) {
+      return { success: false, tokensAdded: 0, newTokens: user.tokens, message: 'شما قبلاً از این کد هدیه استفاده کرده‌اید.' };
+    }
+
+    // Apply tokens
+    usedUsers.push(user.id);
+    this.data.redeemedCodes[code] = usedUsers;
+    gift.usedCount += 1;
+    if (gift.usedCount >= gift.maxUses) {
+      gift.isExpired = true;
+    }
+
+    user.tokens = (user.tokens || 0) + gift.tokens;
+    this.updateUser(user);
+    this.addTransaction({
+      userId: user.id,
+      type: 'gift_code',
+      amountTokens: gift.tokens,
+      description: `اعمال کد هدیه ${code}`,
+    });
+
+    this.saveToDisk();
+    return {
+      success: true,
+      tokensAdded: gift.tokens,
+      newTokens: user.tokens,
+      message: `کد هدیه با موفقیت اعمال شد و ${gift.tokens} توکن به حساب شما افزوده گردید!`,
+    };
+  }
 }
 
 export const bridgeStore = new BridgeStoreManager();
+

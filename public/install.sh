@@ -163,11 +163,23 @@ USER_PORT=${USER_PORT:-$DEFAULT_PORT}
 echo -e "${BLUE}[5/6] Nasbe package-haye npm va build file-haye frontend...${PLAIN}"
 npm install --legacy-peer-deps
 
-echo -e "Dar hale build ba Vite & WASM..."
-npm run build || true
-if [ ! -f "server.js" ]; then
-    npx -y esbuild-wasm server.ts --bundle --platform=node --format=esm --packages=external --outfile=server.js || true
+echo -e "Dar hale barrasi file-haye frontend dist..."
+if [ -f "public/dist.tar.gz" ]; then
+    mkdir -p dist
+    tar -xzf public/dist.tar.gz -C dist/ || true
 fi
+if [ ! -f "dist/index.html" ]; then
+    echo -e "${YELLOW}Daryafte noskheye amadeye frontend dist...${PLAIN}"
+    mkdir -p dist
+    curl -fsSL https://raw.githubusercontent.com/disslove1993/panel/main/public/dist.tar.gz | tar -xz -C dist || true
+fi
+if [ ! -f "dist/index.html" ]; then
+    npm run build || true
+fi
+
+echo -e "Dar hale sakhte server.js bedone niaze be AVX..."
+npx -y esbuild-wasm server.ts --bundle --platform=node --format=esm --packages=external --outfile=server.js || true
+
 
 # 8. Create Systemd Service
 echo -e "${BLUE}[6/6] Ijad va fa'alsazi service systemd...${PLAIN}"

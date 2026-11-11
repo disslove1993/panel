@@ -33,12 +33,18 @@ interface BridgeManagementViewProps {
 }
 
 export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRefreshPanel }) => {
-  const [activeTab, setActiveTab] = useState<'prompt' | 'vps' | 'simulator' | 'users' | 'plans'>('vps');
+  const [activeTab, setActiveTab] = useState<'prompt' | 'vps' | 'simulator' | 'users' | 'plans' | 'wallet'>('vps');
   const [users, setUsers] = useState<BridgeUser[]>([]);
   const [plans, setPlans] = useState<BridgePlan[]>([]);
   const [servers, setServers] = useState<BridgeServerItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
+
+  // Wallet State
+  const [giftCodes, setGiftCodes] = useState<any[]>([]);
+  const [newGiftCode, setNewGiftCode] = useState('');
+  const [newGiftTokens, setNewGiftTokens] = useState('1000');
+  const [giftStatusMsg, setGiftStatusMsg] = useState<string | null>(null);
 
   // Simulator State
   const [simEmail, setSimEmail] = useState('user_' + Math.floor(1000 + Math.random() * 9000) + '@app.local');
@@ -49,8 +55,13 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
   const [simIsConnected, setSimIsConnected] = useState(false);
   const [simStatusMsg, setSimStatusMsg] = useState<string | null>(null);
   const [simQrModal, setSimQrModal] = useState<string | null>(null);
+  const [simGiftInput, setSimGiftInput] = useState('WELCOME2026');
 
-  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://your-domain.run.app';
+  // Dynamic Bridge Server URL Setting for Mobile App
+  const [serverHostInput, setServerHostInput] = useState('http://130.185.121.250:3000');
+  const [serverPingStatus, setServerPingStatus] = useState<'idle' | 'testing' | 'success' | 'failed'>('idle');
+
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://130.185.121.250:3000';
 
   const copyToClipboard = (text: string, sectionId: string) => {
     navigator.clipboard.writeText(text);
@@ -75,9 +86,46 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
     }
   };
 
+  const fetchGiftCodes = async () => {
+    try {
+      const res = await fetch('/api/bridge/admin/gift-codes');
+      const data = await res.json();
+      if (data && data.success) {
+        setGiftCodes(data.giftCodes || []);
+      }
+    } catch (err) {
+      console.error('Error fetching gift codes:', err);
+    }
+  };
+
+  const handleCreateGiftCode = async () => {
+    if (!newGiftCode.trim()) return;
+    try {
+      const res = await fetch('/api/bridge/admin/gift-codes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: newGiftCode.trim(),
+          tokens: Number(newGiftTokens) || 1000,
+          maxUses: 500,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setGiftStatusMsg(`کد هدیه «${newGiftCode.toUpperCase()}» با موفقیت ساخته شد.`);
+        setNewGiftCode('');
+        fetchGiftCodes();
+      }
+    } catch (err: any) {
+      setGiftStatusMsg(err.message || 'خطا در ساخت کد هدیه');
+    }
+  };
+
   useEffect(() => {
     fetchBridgeData();
+    fetchGiftCodes();
   }, []);
+
 
   // Simulator: Step 1 Register
   const handleSimRegister = async () => {
@@ -139,68 +187,53 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
   };
 
   // Full AI Studio Prompt in Persian ready to copy-paste
-  const aiStudioPrompt = `سلام! من می‌خواهم اپلیکیشن VPN / فیلترشکن خود را به پنل میانه (Middleware API) متصل کنم تا هر کاربر بتواند ثبت‌نام کند، موجودی توکن دریافت کند، اشتراک (مثلاً ۱ ماهه ۱۰ گیگ) بخرد و کانفیگ VLESS اختصاصی برای اتصال دریافت نماید.
+  const aiStudioPrompt = `سلام! لطفاً این تغییرات اساسی را در اپلیکیشن VPN / فیلترشکن من اعمال و پیاده‌سازی کن:
 
-آدرس پایه سرور میانه (Base URL):
-${baseUrl}
+============================================================
+۱. بخش مدیریت پنهان (Admin Settings) و تغییر پویای آدرس سرور (بدون دستکاری کد):
+============================================================
+- در برنامه یک صفحه یا مودال مخفی ورود مدیریت (Admin Login) بساز (مثلاً با سه بار لمس روی آرم/لوگوی بالای برنامه، یا یک آیکون چرخ‌دنده در پروفایل).
+- مشخصات پیش‌فرض ورود مدیر:
+  • نام کاربری: admin
+  • رمز عبور: admin123
+- پس از لاگین مدیر، صفحه‌ای باز شود شامل:
+  • فیلد متنی «آدرس سرور پل ارتباطی (Bridge Server URL)» با مقدار پیش‌فرض: http://130.185.121.250:3000
+  • دکمه «تست اتصال به سرور»: با متد GET به مسیر {BASE_URL}/api/bridge/health درخواست بزند و در صورت پاسخ سبز نشان دهد: «اتصال برقرار است ✅»
+  • دکمه «ذخیره تنظیمات»: این آدرس را در حافظه ماندگار (AsyncStorage / localStorage) تحت کلید "bridge_server_url" ذخیره کند.
+- تمام بخش‌های اپلیکیشن برای ارسال درخواست‌ها باید از این آدرس پویا استفاده کنند تا اگر در آینده سرور یا دامنه‌ام عوض شد، نیازی به تغییر کد برنامه نباشد.
 
-لطفاً این قابلیت‌ها را در کد اپلیکیشن پیاده‌سازی و یکپارچه کن:
+============================================================
+۲. رفع باگ حذف شدن اشتراک و جلوگیری از کانفیگ‌های اشتباه (novashield):
+============================================================
+- علت اینکه اشتراک با بستن برنامه می‌پرید این است که وضعیت کاربر در حافظه ماندگار ذخیره نمی‌شد:
+  • هنگام ثبت‌نام یا ورود (POST /api/bridge/register یا login)، آبجکت کاربر (user)، موجودی توکن (tokens) و کل اطلاعات اشتراک (subscription) و کانفیگ واقعی VLESS (configUri) را در AsyncStorage / localStorage ذخیره کن.
+  • با اجرای مجدد برنامه، ابتدا این اطلاعات را از حافظه بارگذاری کن تا کاربر اشتراک خود را نبازد و نیاز به خرید مجدد نباشد.
+  • همچنین با یک درخواست GET به {BASE_URL}/api/bridge/user/{email}، اطلاعات وضعیت مصرف حجم و باقی‌مانده را بروز کن.
+- اکیداً هرگونه کانفیگ فیک یا ماک (مثل novashield-vpn.io یا هر URL ثابت تستی) را از کدها حذف کن! تمام کانفیگ‌ها باید ۱۰۰٪ از سرور پل ثنایی دریافت شوند.
 
-۱. ثبت‌نام کاربر در بدو ورود یا لاگین:
-- متد: POST
-- آدرس: ${baseUrl}/api/bridge/register
-- بدنه درخواست (JSON):
-  {
-    "email": "user@gmail.com",
-    "name": "نام کاربر",
-    "deviceId": "شناسه دستگاه"
-  }
-- پاسخ دریافتی: اطلاعات کاربر شامل شناسه، نام، موجودی توکن (tokens: 1000) و وضعیت اشتراک. این اطلاعات را در وضعیت محلی (State) برنامه ذخیره کن.
+============================================================
+۳. پیاده‌سازی کامل تب کیف پول (Wallet Tab):
+============================================================
+- در تب سوم اپلیکیشن (آیکون کیف پول Wallet)، این بخش‌ها را پیاده کن:
+  ۱) نمایش موجودی توکن کاربر (هم‌خوان با نشانگر بالای برنامه، مثلاً ۱۰۰۰ Tokens).
+  ۲) بخش «کد هدیه و ووچر (Gift Voucher)»:
+     - فیلد وارد کردن کد و دکمه «اعمال کد هدیه».
+     - متد: POST به {BASE_URL}/api/bridge/wallet/redeem با بدنه: { "userId": user.id, "code": "WELCOME2026" }
+     - در صورت موفقیت، توکن‌های اضافه شده را فوراً به موجودی کیف پول کاربر بیفزا و پیام موفقیت نشان بده.
+  ۳) بخش «بسته‌های شارژ توکن»:
+     - متد: GET از {BASE_URL}/api/bridge/wallet/packages
+     - نمایش بسته‌های ۱۰۰۰ توکن، ۲۵۰۰ توکن و ۵۰۰۰ توکن با قیمت تومان.
+     - با کلیک روی هر بسته، متد POST به {BASE_URL}/api/bridge/wallet/topup ارسال شود تا موجودی افزایش یابد.
+  ۴) تاریخچه تراکنش‌ها (Transactions):
+     - متد: GET از {BASE_URL}/api/bridge/wallet/transactions/{user.id}
+     - نمایش لیست هدیه خوش‌آمدگویی، اعمال کدهای تخفیف و خریدهای اشتراک.
 
-۲. نمایش لیست پلن‌ها و اشتراک‌ها:
-- متد: GET
-- آدرس: ${baseUrl}/api/bridge/plans
-- در صفحه خرید اشتراک یا دکمه PRO، لیست این پلن‌ها را نشان بده (مثلاً: «اشتراک ۱ ماهه - ۱۰ گیگابایت» با قیمت ۱۰۰۰ توکن).
+============================================================
+۴. نحوه اتصال مستقیم VPN (دکمه Tap to Connect):
+============================================================
+- اگر کاربر اشتراک فعال دارد (user.subscription.status === 'active')، با کلیک روی دکمه بزرگ دایره‌ای، مستقیماً از رشته configUri دریافت شده از ثنایی (vless://...) برای استارت هسته VPN استفاده کن.
+- اگر اشتراک نداشت، لیست پلن‌ها (GET /api/bridge/plans) را باز کن تا با موجودی توکنش (۱۰۰۰ توکن رایگان هدیه) اشتراک ۱ ماهه ۱۰ گیگ را فعال کند.`;
 
-۳. خرید / فعال‌سازی اشتراک روی این‌باند ثنایی:
-- متد: POST
-- آدرس: ${baseUrl}/api/bridge/purchase
-- بدنه درخواست (JSON):
-  {
-    "email": "user@gmail.com",
-    "planId": "plan_1m_10gb",
-    "inboundId": 4
-  }
-- پاسخ دریافتی:
-  {
-    "success": true,
-    "subscription": {
-      "status": "active",
-      "planName": "اشتراک ۱ ماهه - ۱۰ گیگابایت",
-      "trafficTotalGB": 10,
-      "trafficRemainingGB": 10,
-      "remainingDays": 30,
-      "configUri": "vless://UUID@HOST:PORT?params...#REMARK",
-      "subUrl": "https://HOST:2096/sub/..."
-    },
-    "configUri": "vless://...",
-    "user": { "tokens": 0 }
-  }
-- بلافاصله رشته configUri را بردار و به هسته VPN برنامه بده تا با کلیک روی دکمه بزرگ دایره‌ای (Tap to connect)، اتصال برقرار شود.
-
-۴. دکمه اتصال (Tap to Connect):
-- با زدن دکمه، اگر کاربر اشتراک فعال دارد، مستقیماً با کانفیگ configUri موجود وصل شو.
-- اگر اشتراک ندارد، صفحه انتخاب پلن (۱۰ گیگ با ۱۰۰۰ توکن) را باز کن تا با تایید کاربر ساخته شود.
-
-۵. نمایش وضعیت زنده مصرف و روزهای باقی‌مانده:
-- متد: GET
-- آدرس: ${baseUrl}/api/bridge/user/{email}
-- فیلدهای trafficRemainingBytes و remainingDays را در پروفایل کاربر و داشبورد نمایش بده.
-
-۶. دریافت لیست سرورها:
-- متد: GET
-- آدرس: ${baseUrl}/api/bridge/servers
-- نام، پینگ (pingMs) و لوکیشن سرورها را در لیست سرورهای پایین صفحه جایگزین کن.`;
 
   return (
     <div className="space-y-6">
@@ -269,8 +302,21 @@ ${baseUrl}
               <Users className="w-4 h-4" />
               کاربران ثبت‌شده ({users.length})
             </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('wallet')}
+              className={`px-4 py-2.5 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
+                activeTab === 'wallet'
+                  ? 'bg-sky-500 text-white shadow-lg shadow-sky-500/25'
+                  : 'bg-white/10 text-white hover:bg-white/20'
+              }`}
+            >
+              <Coins className="w-4 h-4" />
+              کیف پول و ووچرها
+            </button>
           </div>
         </div>
+
       </div>
 
       {/* Mini KPI Strip */}
@@ -1076,6 +1122,132 @@ ${baseUrl}
           ))}
         </div>
       )}
+
+      {/* TAB 5: WALLET & GIFT CODES */}
+      {activeTab === 'wallet' && (
+        <div className="space-y-6">
+          {/* Top Wallet Summary Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="p-5 bg-gradient-to-br from-amber-500/10 via-slate-900 to-slate-900 border border-amber-500/30 rounded-2xl space-y-2">
+              <div className="flex items-center justify-between text-xs text-amber-400">
+                <span>کل توکن‌های در گردش کاربران</span>
+                <Coins className="w-4 h-4" />
+              </div>
+              <div className="text-3xl font-black font-mono text-white">
+                {users.reduce((acc, u) => acc + (u.tokens || 0), 0).toLocaleString()}
+                <span className="text-sm text-amber-400 mr-2">توکن</span>
+              </div>
+              <p className="text-xs text-slate-400">
+                قابل مصرف در اپلیکیشن موبایل برای خرید اشتراک‌های VLESS ثنایی
+              </p>
+            </div>
+
+            <div className="p-5 bg-gradient-to-br from-emerald-500/10 via-slate-900 to-slate-900 border border-emerald-500/30 rounded-2xl space-y-2">
+              <div className="flex items-center justify-between text-xs text-emerald-400">
+                <span>کدهای هدیه و ووچرهای فعال</span>
+                <Sparkles className="w-4 h-4" />
+              </div>
+              <div className="text-3xl font-black font-mono text-white">
+                {giftCodes.length}
+                <span className="text-sm text-emerald-400 mr-2">کد فعال</span>
+              </div>
+              <p className="text-xs text-slate-400">
+                کدهای معتبر برای افزایش خودکار موجودی کاربران در تب Wallet
+              </p>
+            </div>
+
+            <div className="p-5 bg-gradient-to-br from-sky-500/10 via-slate-900 to-slate-900 border border-sky-500/30 rounded-2xl space-y-2">
+              <div className="flex items-center justify-between text-xs text-sky-400">
+                <span>هدیه خوش‌آمدگویی ثبت‌نام</span>
+                <Zap className="w-4 h-4" />
+              </div>
+              <div className="text-3xl font-black font-mono text-white">
+                1,000
+                <span className="text-sm text-sky-400 mr-2">توکن رایگان</span>
+              </div>
+              <p className="text-xs text-slate-400">
+                به هر کاربر جدید در بدو ثبت‌نام یا نصب اپلیکیشن اهدا می‌شود
+              </p>
+            </div>
+          </div>
+
+          {/* Create & Manage Gift Codes Section */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                  <Coins className="w-5 h-5 text-amber-500" />
+                  <span>تولید و مدیریت کدهای هدیه (Gift Vouchers)</span>
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  کاربران می‌توانند این کدها را در تب «کیف پول» اپلیکیشن موبایل وارد کرده و توکن رایگان دریافت کنند.
+                </p>
+              </div>
+
+              {giftStatusMsg && (
+                <div className="text-xs px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  {giftStatusMsg}
+                </div>
+              )}
+            </div>
+
+            {/* Form */}
+            <div className="flex flex-wrap items-center gap-3">
+              <input
+                type="text"
+                placeholder="عنوان کد (مثلاً VIP2026)"
+                value={newGiftCode}
+                onChange={(e) => setNewGiftCode(e.target.value.toUpperCase())}
+                className="px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono uppercase text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500 w-44"
+              />
+              <input
+                type="number"
+                placeholder="تعداد توکن"
+                value={newGiftTokens}
+                onChange={(e) => setNewGiftTokens(e.target.value)}
+                className="px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500 w-32"
+              />
+              <button
+                type="button"
+                onClick={handleCreateGiftCode}
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs rounded-xl shadow transition-all flex items-center gap-1.5"
+              >
+                <Plus className="w-4 h-4" />
+                ساخت کد هدیه جدید
+              </button>
+            </div>
+
+            {/* List of active Gift Codes */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 pt-2">
+              {giftCodes.map((g) => (
+                <div
+                  key={g.id || g.code}
+                  className="p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 rounded-xl flex items-center justify-between"
+                >
+                  <div>
+                    <div className="font-mono font-bold text-sm text-amber-500">{g.code}</div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                      ارزش: <strong className="text-slate-900 dark:text-slate-100 font-mono">{g.tokens}</strong> توکن
+                    </div>
+                    <div className="text-[11px] text-slate-400 mt-1">
+                      مصرف: {g.usedCount || 0} از {g.maxUses || 500}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => copyToClipboard(g.code, g.code)}
+                    className="px-2.5 py-1.5 text-xs bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg hover:bg-amber-500 hover:text-black transition-all flex items-center gap-1"
+                  >
+                    {copiedSection === g.code ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>کپی</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+

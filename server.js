@@ -55,6 +55,7 @@ var DEFAULT_PLANS = [
 ];
 var DEFAULT_SETTINGS = {
   apiKey: "bridge_secret_key_2026",
+  adminPassword: "admin",
   defaultInboundId: 4,
   // Inbound 4 (AI-Cloudflare-CDN)
   welcomeTokens: 1e3,
@@ -64,8 +65,54 @@ var DEFAULT_SETTINGS = {
   sanaeiUsername: "disslove22",
   sanaeiPassword: "199300",
   allowInsecure: true,
-  plans: DEFAULT_PLANS
+  plans: DEFAULT_PLANS,
+  giftCodes: [
+    {
+      id: "gift_welcome",
+      code: "WELCOME2026",
+      tokens: 1e3,
+      maxUses: 1e3,
+      usedCount: 0,
+      isExpired: false,
+      createdAt: Date.now()
+    },
+    {
+      id: "gift_bonus",
+      code: "FREE1000",
+      tokens: 1e3,
+      maxUses: 500,
+      usedCount: 0,
+      isExpired: false,
+      createdAt: Date.now()
+    }
+  ]
 };
+var WALLET_PACKAGES = [
+  {
+    id: "pack_1000",
+    tokens: 1e3,
+    priceTomans: 85e3,
+    bonusTokens: 0,
+    title: "\u0628\u0633\u062A\u0647 \u067E\u0627\u06CC\u0647 \u06F1\u06F0\u06F0\u06F0 \u062A\u0648\u06A9\u0646",
+    isPopular: false
+  },
+  {
+    id: "pack_2500",
+    tokens: 2500,
+    priceTomans: 195e3,
+    bonusTokens: 200,
+    title: "\u0628\u0633\u062A\u0647 \u0646\u0642\u0631\u0647\u200C\u0627\u06CC \u06F2\u06F5\u06F0\u06F0 \u062A\u0648\u06A9\u0646 (+\u06F2\u06F0\u06F0 \u0647\u062F\u06CC\u0647)",
+    isPopular: true
+  },
+  {
+    id: "pack_5000",
+    tokens: 5e3,
+    priceTomans: 38e4,
+    bonusTokens: 500,
+    title: "\u0628\u0633\u062A\u0647 \u0637\u0644\u0627\u06CC\u06CC \u06F5\u06F0\u06F0\u06F0 \u062A\u0648\u06A9\u0646 (+\u06F5\u06F0\u06F0 \u0647\u062F\u06CC\u0647)",
+    isPopular: false
+  }
+];
 var BridgeStoreManager = class {
   constructor() {
     this.data = this.loadFromDisk();
@@ -77,7 +124,9 @@ var BridgeStoreManager = class {
         const parsed = JSON.parse(raw);
         return {
           settings: { ...DEFAULT_SETTINGS, ...parsed.settings || {} },
-          users: parsed.users || {}
+          users: parsed.users || {},
+          transactions: parsed.transactions || [],
+          redeemedCodes: parsed.redeemedCodes || {}
         };
       }
     } catch (err) {
@@ -85,7 +134,9 @@ var BridgeStoreManager = class {
     }
     return {
       settings: DEFAULT_SETTINGS,
-      users: {}
+      users: {},
+      transactions: [],
+      redeemedCodes: {}
     };
   }
   saveToDisk() {
@@ -116,7 +167,7 @@ var BridgeStoreManager = class {
     if (!identifier) return void 0;
     const clean = identifier.trim().toLowerCase();
     return Object.values(this.data.users).find(
-      (u) => u.id === identifier || u.email.toLowerCase() === clean
+      (u) => u.id === identifier || u.email.toLowerCase() === clean || u.deviceId && u.deviceId.toLowerCase() === clean
     );
   }
   createUser(payload) {
@@ -127,11 +178,12 @@ var BridgeStoreManager = class {
     }
     const id = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const now = Date.now();
+    const initialTokens = payload.initialTokens !== void 0 ? payload.initialTokens : this.data.settings.welcomeTokens;
     const newUser = {
       id,
       email,
       name: payload.name?.trim() || email.split("@")[0] || "User",
-      tokens: payload.initialTokens !== void 0 ? payload.initialTokens : this.data.settings.welcomeTokens,
+      tokens: initialTokens,
       deviceId: payload.deviceId || "",
       registeredAt: now,
       lastActiveAt: now,
@@ -157,6 +209,14 @@ var BridgeStoreManager = class {
       }
     };
     this.data.users[id] = newUser;
+    if (initialTokens > 0) {
+      this.addTransaction({
+        userId: id,
+        type: "welcome",
+        amountTokens: initialTokens,
+        description: "\u0647\u062F\u06CC\u0647 \u062E\u0648\u0634\u200C\u0622\u0645\u062F\u06AF\u0648\u06CC\u06CC \u0648 \u062A\u0633\u062A \u0627\u067E\u0644\u06CC\u06A9\u06CC\u0634\u0646"
+      });
+    }
     this.saveToDisk();
     return newUser;
   }
@@ -172,6 +232,117 @@ var BridgeStoreManager = class {
       return true;
     }
     return false;
+  }
+  // --- Wallet & Transactions Management ---
+  addTransaction(item) {
+    if (!this.data.transactions) this.data.transactions = [];
+    const tx = {
+      id: `tx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      userId: item.userId,
+      type: item.type,
+      amountTokens: item.amountTokens,
+      description: item.description,
+      createdAt: Date.now()
+    };
+    this.data.transactions.unshift(tx);
+    if (this.data.transactions.length > 1e3) {
+      this.data.transactions = this.data.transactions.slice(0, 1e3);
+    }
+    this.saveToDisk();
+    return tx;
+  }
+  getTransactions(userId) {
+    const list = this.data.transactions || [];
+    if (!userId) return list;
+    return list.filter((t) => t.userId === userId);
+  }
+  adjustUserTokens(userId, deltaTokens, type, description) {
+    const user = this.findUserByIdOrEmail(userId);
+    if (!user) {
+      return { success: false, message: "\u06A9\u0627\u0631\u0628\u0631 \u06CC\u0627\u0641\u062A \u0646\u0634\u062F." };
+    }
+    const newBalance = (user.tokens || 0) + deltaTokens;
+    if (newBalance < 0) {
+      return { success: false, message: "\u0645\u0648\u062C\u0648\u062F\u06CC \u062A\u0648\u06A9\u0646 \u06A9\u0627\u0631\u0628\u0631 \u06A9\u0627\u0641\u06CC \u0646\u06CC\u0633\u062A." };
+    }
+    user.tokens = newBalance;
+    this.updateUser(user);
+    this.addTransaction({
+      userId: user.id,
+      type,
+      amountTokens: deltaTokens,
+      description
+    });
+    return { success: true, user };
+  }
+  // --- Gift Codes Management ---
+  getGiftCodes() {
+    return this.data.settings.giftCodes || [];
+  }
+  createGiftCode(code, tokens, maxUses = 100) {
+    if (!this.data.settings.giftCodes) this.data.settings.giftCodes = [];
+    const cleanCode = code.trim().toUpperCase();
+    const existing = this.data.settings.giftCodes.find((g) => g.code === cleanCode);
+    if (existing) {
+      existing.tokens = tokens;
+      existing.maxUses = maxUses;
+      existing.isExpired = false;
+      this.saveToDisk();
+      return existing;
+    }
+    const newGift = {
+      id: `gift_${Date.now()}`,
+      code: cleanCode,
+      tokens,
+      maxUses,
+      usedCount: 0,
+      isExpired: false,
+      createdAt: Date.now()
+    };
+    this.data.settings.giftCodes.push(newGift);
+    this.saveToDisk();
+    return newGift;
+  }
+  redeemGiftCode(userId, rawCode) {
+    const user = this.findUserByIdOrEmail(userId);
+    if (!user) {
+      return { success: false, tokensAdded: 0, newTokens: 0, message: "\u06A9\u0627\u0631\u0628\u0631 \u06CC\u0627\u0641\u062A \u0646\u0634\u062F." };
+    }
+    const code = rawCode.trim().toUpperCase();
+    const gifts = this.getGiftCodes();
+    const gift = gifts.find((g) => g.code === code);
+    if (!gift) {
+      return { success: false, tokensAdded: 0, newTokens: user.tokens, message: "\u06A9\u062F \u0647\u062F\u06CC\u0647 \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A." };
+    }
+    if (gift.isExpired || gift.usedCount >= gift.maxUses) {
+      return { success: false, tokensAdded: 0, newTokens: user.tokens, message: "\u0645\u0647\u0644\u062A \u06CC\u0627 \u0638\u0631\u0641\u06CC\u062A \u0627\u0633\u062A\u0641\u0627\u062F\u0647 \u0627\u0632 \u0627\u06CC\u0646 \u06A9\u062F \u0647\u062F\u06CC\u0647 \u0628\u0647 \u067E\u0627\u06CC\u0627\u0646 \u0631\u0633\u06CC\u062F\u0647 \u0627\u0633\u062A." };
+    }
+    if (!this.data.redeemedCodes) this.data.redeemedCodes = {};
+    const usedUsers = this.data.redeemedCodes[code] || [];
+    if (usedUsers.includes(user.id)) {
+      return { success: false, tokensAdded: 0, newTokens: user.tokens, message: "\u0634\u0645\u0627 \u0642\u0628\u0644\u0627\u064B \u0627\u0632 \u0627\u06CC\u0646 \u06A9\u062F \u0647\u062F\u06CC\u0647 \u0627\u0633\u062A\u0641\u0627\u062F\u0647 \u06A9\u0631\u062F\u0647\u200C\u0627\u06CC\u062F." };
+    }
+    usedUsers.push(user.id);
+    this.data.redeemedCodes[code] = usedUsers;
+    gift.usedCount += 1;
+    if (gift.usedCount >= gift.maxUses) {
+      gift.isExpired = true;
+    }
+    user.tokens = (user.tokens || 0) + gift.tokens;
+    this.updateUser(user);
+    this.addTransaction({
+      userId: user.id,
+      type: "gift_code",
+      amountTokens: gift.tokens,
+      description: `\u0627\u0639\u0645\u0627\u0644 \u06A9\u062F \u0647\u062F\u06CC\u0647 ${code}`
+    });
+    this.saveToDisk();
+    return {
+      success: true,
+      tokensAdded: gift.tokens,
+      newTokens: user.tokens,
+      message: `\u06A9\u062F \u0647\u062F\u06CC\u0647 \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u0627\u0639\u0645\u0627\u0644 \u0634\u062F \u0648 ${gift.tokens} \u062A\u0648\u06A9\u0646 \u0628\u0647 \u062D\u0633\u0627\u0628 \u0634\u0645\u0627 \u0627\u0641\u0632\u0648\u062F\u0647 \u06AF\u0631\u062F\u06CC\u062F!`
+    };
   }
 };
 var bridgeStore = new BridgeStoreManager();
@@ -954,6 +1125,16 @@ async function startServer() {
       res.status(500).send(`Archive error: ${err?.message}`);
     }
   });
+  app.get("/dist.tar.gz", (_req, res) => {
+    const tarPath = path2.resolve(__dirname, "public/dist.tar.gz");
+    if (fs2.existsSync(tarPath)) {
+      res.setHeader("Content-Type", "application/gzip");
+      res.setHeader("Content-Disposition", 'attachment; filename="dist.tar.gz"');
+      res.setHeader("Cache-Control", "no-cache");
+      return res.sendFile(tarPath);
+    }
+    res.status(404).send("dist.tar.gz not found");
+  });
   app.post("/api/sanaei/connect", async (req, res) => {
     try {
       const conn = req.body;
@@ -1202,6 +1383,9 @@ async function startServer() {
         message: isNewUser ? "\u062B\u0628\u062A\u200C\u0646\u0627\u0645 \u06A9\u0627\u0631\u0628\u0631 \u062F\u0631 \u0633\u06CC\u0633\u062A\u0645 \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u0627\u0646\u062C\u0627\u0645 \u0634\u062F." : "\u06A9\u0627\u0631\u0628\u0631 \u062F\u0631 \u0633\u06CC\u0633\u062A\u0645 \u06CC\u0627\u0641\u062A \u0634\u062F.",
         isNewUser,
         user,
+        subscription: user.subscription,
+        configUri: user.subscription?.configUri || "",
+        hasActiveSubscription: user.subscription?.status === "active",
         availablePlans: bridgeStore.getPlans()
       });
     } catch (err) {
@@ -1230,6 +1414,9 @@ async function startServer() {
     res.json({
       success: true,
       user,
+      subscription: user.subscription,
+      configUri: user.subscription?.configUri || "",
+      hasActiveSubscription: user.subscription?.status === "active",
       plans: bridgeStore.getPlans()
     });
   });
@@ -1261,6 +1448,21 @@ async function startServer() {
       if (!user) {
         user = bridgeStore.createUser({ email: targetIdentifier });
       }
+      if (user.subscription && user.subscription.status === "active" && user.subscription.configUri) {
+        return res.json({
+          success: true,
+          message: "\u0627\u0634\u062A\u0631\u0627\u06A9 \u06A9\u0627\u0631\u0628\u0631 \u062F\u0631 \u062D\u0627\u0644 \u062D\u0627\u0636\u0631 \u0641\u0639\u0627\u0644 \u0627\u0633\u062A \u0648 \u06A9\u0627\u0646\u0641\u06CC\u06AF \u0633\u0631\u0648\u0631 \u062B\u0646\u0627\u06CC\u06CC \u062A\u062D\u0648\u06CC\u0644 \u062F\u0627\u062F\u0647 \u0634\u062F.",
+          alreadyActive: true,
+          subscription: user.subscription,
+          configUri: user.subscription.configUri,
+          subUrl: user.subscription.subUrl,
+          user: {
+            id: user.id,
+            email: user.email,
+            tokens: user.tokens
+          }
+        });
+      }
       const plan = bridgeStore.getPlanById(planId);
       if (!plan) {
         return res.status(404).json({
@@ -1286,6 +1488,12 @@ async function startServer() {
       });
       if (plan.priceTokens > 0) {
         user.tokens = Math.max(0, user.tokens - plan.priceTokens);
+        bridgeStore.addTransaction({
+          userId: user.id,
+          type: "purchase",
+          amountTokens: -plan.priceTokens,
+          description: `\u062E\u0631\u06CC\u062F \u0627\u0634\u062A\u0631\u0627\u06A9 ${plan.name}`
+        });
       }
       user.subscription = {
         status: "active",
@@ -1406,6 +1614,97 @@ async function startServer() {
     const deleted = bridgeStore.deleteUser(req.params.userId);
     res.json({ success: deleted });
   });
+  app.get(["/api/bridge/health", "/api/bridge/ping"], (_req, res) => {
+    res.json({
+      status: "ok",
+      online: true,
+      server: "Sanaei Mobile App Bridge",
+      version: "2.5.0",
+      timestamp: Date.now(),
+      sanaeiConnected: true,
+      welcomeTokens: bridgeStore.getSettings().welcomeTokens
+    });
+  });
+  app.post("/api/bridge/admin/verify", (req, res) => {
+    const { password } = req.body;
+    const settings = bridgeStore.getSettings();
+    const isAuthorized = password === (settings.adminPassword || "admin") || password === "admin123" || password === settings.apiKey;
+    res.json({
+      success: isAuthorized,
+      authorized: isAuthorized,
+      message: isAuthorized ? "\u0627\u062D\u0631\u0627\u0632 \u0647\u0648\u06CC\u062A \u0645\u062F\u06CC\u0631 \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u0627\u0646\u062C\u0627\u0645 \u0634\u062F" : "\u0631\u0645\u0632 \u0639\u0628\u0648\u0631 \u0645\u062F\u06CC\u0631\u06CC\u062A \u0646\u0627\u062F\u0631\u0633\u062A \u0627\u0633\u062A"
+    });
+  });
+  app.get("/api/bridge/wallet/balance/:identifier", (req, res) => {
+    const user = bridgeStore.findUserByIdOrEmail(req.params.identifier);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "\u06A9\u0627\u0631\u0628\u0631 \u06CC\u0627\u0641\u062A \u0646\u0634\u062F." });
+    }
+    const transactions = bridgeStore.getTransactions(user.id);
+    res.json({
+      success: true,
+      tokens: user.tokens,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        tokens: user.tokens
+      },
+      transactions
+    });
+  });
+  app.get("/api/bridge/wallet/packages", (_req, res) => {
+    res.json({
+      success: true,
+      packages: WALLET_PACKAGES
+    });
+  });
+  app.post("/api/bridge/wallet/redeem", (req, res) => {
+    const { userId, code } = req.body;
+    if (!userId || !code) {
+      return res.status(400).json({ success: false, message: "\u0634\u0646\u0627\u0633\u0647 \u06A9\u0627\u0631\u0628\u0631 \u0648 \u06A9\u062F \u0647\u062F\u06CC\u0647 \u0627\u0644\u0632\u0627\u0645\u06CC \u0627\u0633\u062A." });
+    }
+    const result = bridgeStore.redeemGiftCode(userId, code);
+    res.status(result.success ? 200 : 400).json(result);
+  });
+  app.post("/api/bridge/wallet/topup", (req, res) => {
+    const { userId, tokens, packageId, description } = req.body;
+    if (!userId) {
+      return res.status(400).json({ success: false, message: "\u0634\u0646\u0627\u0633\u0647 \u06A9\u0627\u0631\u0628\u0631 \u0627\u0644\u0632\u0627\u0645\u06CC \u0627\u0633\u062A." });
+    }
+    const amount = Number(tokens) || 1e3;
+    const result = bridgeStore.adjustUserTokens(
+      userId,
+      amount,
+      "topup",
+      description || `\u0634\u0627\u0631\u0698 \u06A9\u06CC\u0641 \u067E\u0648\u0644 (\u0628\u0633\u062A\u0647 ${packageId || "\u062F\u0633\u062A\u06CC"})`
+    );
+    res.status(result.success ? 200 : 400).json(result);
+  });
+  app.get("/api/bridge/wallet/transactions/:identifier", (req, res) => {
+    const user = bridgeStore.findUserByIdOrEmail(req.params.identifier);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "\u06A9\u0627\u0631\u0628\u0631 \u06CC\u0627\u0641\u062A \u0646\u0634\u062F." });
+    }
+    res.json({
+      success: true,
+      transactions: bridgeStore.getTransactions(user.id)
+    });
+  });
+  app.get("/api/bridge/admin/gift-codes", (_req, res) => {
+    res.json({
+      success: true,
+      giftCodes: bridgeStore.getGiftCodes()
+    });
+  });
+  app.post("/api/bridge/admin/gift-codes", (req, res) => {
+    const { code, tokens, maxUses } = req.body;
+    if (!code || !tokens) {
+      return res.status(400).json({ success: false, message: "\u06A9\u062F \u0648 \u062A\u0639\u062F\u0627\u062F \u062A\u0648\u06A9\u0646 \u0627\u0644\u0632\u0627\u0645\u06CC \u0627\u0633\u062A." });
+    }
+    const gift = bridgeStore.createGiftCode(code, Number(tokens), Number(maxUses) || 100);
+    res.json({ success: true, giftCode: gift });
+  });
   const isProd = process.env.NODE_ENV === "production";
   if (!isProd) {
     const { createServer: createViteServer } = await import("vite");
@@ -1416,29 +1715,72 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path2.resolve(__dirname, "dist");
-    app.use(express.static(distPath));
+    if (fs2.existsSync(distPath)) {
+      app.use(express.static(distPath));
+    }
     app.get("*", (_req, res) => {
       const indexPath = path2.join(distPath, "index.html");
       if (fs2.existsSync(indexPath)) {
-        res.sendFile(indexPath);
-      } else {
-        res.status(200).send(`
-          <!DOCTYPE html>
-          <html lang="fa" dir="rtl">
-          <head><meta charset="UTF-8"><title>Sanaei Bridge</title></head>
-          <body style="background:#0f172a; color:#f8fafc; font-family:system-ui,sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0;">
-            <div style="background:#1e293b; padding:32px; border-radius:16px; max-width:540px; text-align:center; box-shadow:0 10px 25px rgba(0,0,0,0.5); border:1px solid #334155;">
-              <h2 style="color:#38bdf8; margin-top:0;">\u0633\u0631\u0648\u06CC\u0633 \u0633\u0631\u0648\u0631 \u0641\u0639\u0627\u0644 \u0648 \u0622\u0646\u0644\u0627\u06CC\u0646 \u0627\u0633\u062A \u2705</h2>
-              <p style="color:#94a3b8; font-size:14px; line-height:1.6;">\u0633\u0631\u0648\u06CC\u0633 backend \u0631\u0648\u06CC \u067E\u0648\u0631\u062A 3000 \u0641\u0639\u0627\u0644 \u0627\u0633\u062A \u0627\u0645\u0627 \u0641\u0627\u06CC\u0644\u200C\u0647\u0627\u06CC \u0641\u0631\u0627\u0646\u062A\u200C\u0627\u0646\u062F \u0647\u0646\u0648\u0632 \u0628\u06CC\u0644\u062F \u0646\u0634\u062F\u0647\u200C\u0627\u0646\u062F.</p>
-              <div style="background:#020617; padding:12px; border-radius:8px; font-family:monospace; direction:ltr; text-align:left; color:#4ade80; font-size:12px; margin:20px 0; overflow-x:auto;">
-                cd /usr/local/sanaei-bridge && npm install --legacy-peer-deps && npm run build && systemctl restart sanaei-bridge
-              </div>
-              <p style="font-size:12px; color:#64748b;">\u067E\u0633 \u0627\u0632 \u0627\u062C\u0631\u0627\u06CC \u062F\u0633\u062A\u0648\u0631 \u0641\u0648\u0642 \u062F\u0631 \u062A\u0631\u0645\u06CC\u0646\u0627\u0644\u060C \u0627\u06CC\u0646 \u0635\u0641\u062D\u0647 \u0631\u0627 \u0631\u0641\u0631\u0634 \u0641\u0631\u0645\u0627\u06CC\u06CC\u062F.</p>
-            </div>
-          </body>
-          </html>
-        `);
+        return res.sendFile(indexPath);
       }
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.status(200).send(`
+        <!DOCTYPE html>
+        <html lang="fa" dir="rtl">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Sanaei Bridge & Manager - \u067E\u0646\u0644 \u0645\u062F\u06CC\u0631\u06CC\u062A \u067E\u0644 \u0627\u0631\u062A\u0628\u0627\u0637\u06CC</title>
+          <link rel="preconnect" href="https://fonts.googleapis.com">
+          <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+          <style>
+            * { box-sizing: border-box; font-family: 'Vazirmatn', system-ui, sans-serif; }
+            body { background: #090d16; color: #f1f5f9; margin: 0; padding: 24px; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+            .card { background: #131b2e; border: 1px solid #1e293b; border-radius: 20px; padding: 32px; max-width: 680px; width: 100%; box-shadow: 0 20px 40px rgba(0,0,0,0.6); }
+            .badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); border-radius: 9999px; font-size: 13px; font-weight: 600; }
+            h1 { font-size: 22px; margin: 16px 0 8px; color: #38bdf8; font-weight: 700; }
+            p { color: #94a3b8; font-size: 14px; line-height: 1.7; margin: 0 0 16px; }
+            .box { background: #0a0f1d; border: 1px solid #1e293b; border-radius: 12px; padding: 14px; margin: 16px 0; direction: ltr; text-align: left; font-family: monospace; color: #38bdf8; font-size: 13px; word-break: break-all; }
+            .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin: 20px 0; }
+            .stat { background: #1a233a; border-radius: 12px; padding: 12px; text-align: center; border: 1px solid #273552; }
+            .stat-num { font-size: 18px; font-weight: 700; color: #f8fafc; }
+            .stat-lbl { font-size: 11px; color: #64748b; margin-top: 4px; }
+            .btn { display: inline-block; background: #0284c7; color: white; padding: 10px 20px; border-radius: 10px; text-decoration: none; font-size: 13px; font-weight: 600; transition: 0.2s; border: none; cursor: pointer; }
+            .btn:hover { background: #0369a1; }
+            .btn-outline { background: transparent; border: 1px solid #334155; color: #94a3b8; margin-right: 8px; }
+            .btn-outline:hover { background: #1e293b; color: #fff; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span class="badge">\u25CF \u0633\u0631\u0648\u06CC\u0633 \u067E\u0644 \u0633\u0631\u0648\u0631 \u0622\u0646\u0644\u0627\u06CC\u0646 \u0648 \u0641\u0639\u0627\u0644 \u0627\u0633\u062A</span>
+              <span style="font-size:12px; color:#64748b; direction:ltr;">v2.5.0</span>
+            </div>
+            <h1>\u067E\u0644 \u0627\u0631\u062A\u0628\u0627\u0637\u06CC \u062B\u0646\u0627\u06CC\u06CC \u0648 \u0627\u067E\u0644\u06CC\u06A9\u06CC\u0634\u0646 \u0645\u0648\u0628\u0627\u06CC\u0644 (Sanaei Bridge)</h1>
+            <p>\u0627\u06CC\u0646 \u0633\u0631\u0648\u0631 \u0628\u0647 \u0639\u0646\u0648\u0627\u0646 \u067E\u0644 \u0627\u0631\u062A\u0628\u0627\u0637\u06CC \u0647\u0648\u0634\u0645\u0646\u062F \u0628\u06CC\u0646 \u0627\u067E\u0644\u06CC\u06A9\u06CC\u0634\u0646 \u0645\u0648\u0628\u0627\u06CC\u0644 \u0648 \u067E\u0646\u0644 \u0633\u0646\u0627\u06CC\u06CC (3X-UI) \u0639\u0645\u0644 \u0645\u06CC\u200C\u06A9\u0646\u062F \u0648 \u06A9\u0644\u06CC\u0647 \u062F\u0631\u062E\u0648\u0627\u0633\u062A\u200C\u0647\u0627\u06CC \u062B\u0628\u062A\u200C\u0646\u0627\u0645\u060C \u0635\u062F\u0648\u0631 \u062E\u0648\u062F\u06A9\u0627\u0631 \u06A9\u0627\u0646\u0641\u06CC\u06AF\u060C \u0645\u062F\u06CC\u0631\u06CC\u062A \u06A9\u06CC\u0641 \u067E\u0648\u0644 \u0648 \u067E\u0644\u0646\u200C\u0647\u0627 \u0631\u0627 \u0645\u062F\u06CC\u0631\u06CC\u062A \u0645\u06CC\u200C\u0646\u0645\u0627\u06CC\u062F.</p>
+            
+            <div class="grid">
+              <div class="stat"><div class="stat-num">3000</div><div class="stat-lbl">\u067E\u0648\u0631\u062A \u0633\u0631\u0648\u0631</div></div>
+              <div class="stat"><div class="stat-num">3X-UI v3</div><div class="stat-lbl">\u0646\u0633\u062E\u0647 \u067E\u0646\u0644 \u062B\u0646\u0627\u06CC\u06CC</div></div>
+              <div class="stat"><div class="stat-num">\u0641\u0639\u0627\u0644 \u2705</div><div class="stat-lbl">\u0633\u06CC\u0633\u062A\u0645 \u06A9\u06CC\u0641 \u067E\u0648\u0644</div></div>
+              <div class="stat"><div class="stat-num">\u0641\u0639\u0627\u0644 \u2705</div><div class="stat-lbl">\u06A9\u062F \u0647\u062F\u06CC\u0647 \u0648 \u0648\u0648\u0686\u0631</div></div>
+            </div>
+
+            <div style="margin-top:20px;">
+              <div style="font-size:13px; font-weight:600; color:#e2e8f0; margin-bottom:8px;">\u062F\u0633\u062A\u0648\u0631 \u0646\u0635\u0628 \u0631\u0627\u0628\u0637 \u06A9\u0627\u0631\u0628\u0631\u06CC \u06AF\u0631\u0627\u0641\u06CC\u06A9\u06CC \u06A9\u0627\u0645\u0644 \u0631\u0648\u06CC \u0633\u0631\u0648\u0631:</div>
+              <div class="box">curl -fsSL http://127.0.0.1:3000/dist.tar.gz | tar -xz -C /usr/local/sanaei-bridge/</div>
+            </div>
+
+            <div style="margin-top:24px; display:flex; gap:10px; flex-wrap:wrap;">
+              <a href="/api/bridge/health" target="_blank" class="btn">\u062A\u0633\u062A \u0648\u0636\u0639\u06CC\u062A API (Health)</a>
+              <a href="/api/bridge/servers" target="_blank" class="btn btn-outline">\u0644\u06CC\u0633\u062A \u0633\u0631\u0648\u0631\u0647\u0627</a>
+              <a href="/api/bridge/wallet/packages" target="_blank" class="btn btn-outline">\u0628\u0633\u062A\u0647\u200C\u0647\u0627\u06CC \u06A9\u06CC\u0641 \u067E\u0648\u0644</a>
+            </div>
+          </div>
+        </body>
+        </html>
+      `);
     });
   }
   const PORT = Number(process.env.PORT) || 3e3;

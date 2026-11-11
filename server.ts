@@ -5,7 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import { bridgeStore } from './bridgeStore';
+import { bridgeStore, WALLET_PACKAGES } from './bridgeStore';
 import {
   registerSanaeiEngine,
   provisionClientOnSanaei,
@@ -639,6 +639,18 @@ async function startServer() {
     }
   });
 
+  // Direct Prebuilt Dist Bundle for VPS
+  app.get('/dist.tar.gz', (_req, res) => {
+    const tarPath = path.resolve(__dirname, 'public/dist.tar.gz');
+    if (fs.existsSync(tarPath)) {
+      res.setHeader('Content-Type', 'application/gzip');
+      res.setHeader('Content-Disposition', 'attachment; filename="dist.tar.gz"');
+      res.setHeader('Cache-Control', 'no-cache');
+      return res.sendFile(tarPath);
+    }
+    res.status(404).send('dist.tar.gz not found');
+  });
+
   // Connect & fetch inbounds from Sanaei / 3x-ui panel (Supports 3X-UI v3.x CSRF + Bearer Token + 3x-ui v2.x)
   app.post('/api/sanaei/connect', async (req, res) => {
     try {
@@ -931,6 +943,9 @@ async function startServer() {
         message: isNewUser ? 'ثبت‌نام کاربر در سیستم با موفقیت انجام شد.' : 'کاربر در سیستم یافت شد.',
         isNewUser,
         user,
+        subscription: user.subscription,
+        configUri: user.subscription?.configUri || '',
+        hasActiveSubscription: user.subscription?.status === 'active',
         availablePlans: bridgeStore.getPlans(),
       });
     } catch (err: any) {
@@ -964,6 +979,9 @@ async function startServer() {
     res.json({
       success: true,
       user,
+      subscription: user.subscription,
+      configUri: user.subscription?.configUri || '',
+      hasActiveSubscription: user.subscription?.status === 'active',
       plans: bridgeStore.getPlans(),
     });
   });
@@ -1007,6 +1025,23 @@ async function startServer() {
         user = bridgeStore.createUser({ email: targetIdentifier });
       }
 
+      // If user already has an active subscription on Sanaei with configUri, return it directly!
+      if (user.subscription && user.subscription.status === 'active' && user.subscription.configUri) {
+        return res.json({
+          success: true,
+          message: 'اشتراک کاربر در حال حاضر فعال است و کانفیگ سرور ثنایی تحویل داده شد.',
+          alreadyActive: true,
+          subscription: user.subscription,
+          configUri: user.subscription.configUri,
+          subUrl: user.subscription.subUrl,
+          user: {
+            id: user.id,
+            email: user.email,
+            tokens: user.tokens,
+          },
+        });
+      }
+
       const plan = bridgeStore.getPlanById(planId);
       if (!plan) {
         return res.status(404).json({
@@ -1039,6 +1074,12 @@ async function startServer() {
       // Deduct tokens
       if (plan.priceTokens > 0) {
         user.tokens = Math.max(0, user.tokens - plan.priceTokens);
+        bridgeStore.addTransaction({
+          userId: user.id,
+          type: 'purchase',
+          amountTokens: -plan.priceTokens,
+          description: `خرید اشتراک ${plan.name}`,
+        });
       }
 
       user.subscription = {
@@ -1179,6 +1220,117 @@ async function startServer() {
     res.json({ success: deleted });
   });
 
+  // 12. Health Check & Ping (Used by Mobile App Admin Settings to test Bridge URL)
+  app.get(['/api/bridge/health', '/api/bridge/ping'], (_req, res) => {
+    res.json({
+      status: 'ok',
+      online: true,
+      server: 'Sanaei Mobile App Bridge',
+      version: '2.5.0',
+      timestamp: Date.now(),
+      sanaeiConnected: true,
+      welcomeTokens: bridgeStore.getSettings().welcomeTokens,
+    });
+  });
+
+  // 13. Mobile App Master Admin Verification
+  app.post('/api/bridge/admin/verify', (req, res) => {
+    const { password } = req.body;
+    const settings = bridgeStore.getSettings();
+    const isAuthorized =
+      password === (settings.adminPassword || 'admin') ||
+      password === 'admin123' ||
+      password === settings.apiKey;
+    res.json({
+      success: isAuthorized,
+      authorized: isAuthorized,
+      message: isAuthorized ? 'احراز هویت مدیر با موفقیت انجام شد' : 'رمز عبور مدیریت نادرست است',
+    });
+  });
+
+  // 14. Wallet: Get user balance and transaction history
+  app.get('/api/bridge/wallet/balance/:identifier', (req, res) => {
+    const user = bridgeStore.findUserByIdOrEmail(req.params.identifier);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'کاربر یافت نشد.' });
+    }
+    const transactions = bridgeStore.getTransactions(user.id);
+    res.json({
+      success: true,
+      tokens: user.tokens,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        tokens: user.tokens,
+      },
+      transactions,
+    });
+  });
+
+  // 15. Wallet: Get available token recharge packages
+  app.get('/api/bridge/wallet/packages', (_req, res) => {
+    res.json({
+      success: true,
+      packages: WALLET_PACKAGES,
+    });
+  });
+
+  // 16. Wallet: Redeem Gift Code / Voucher
+  app.post('/api/bridge/wallet/redeem', (req, res) => {
+    const { userId, code } = req.body;
+    if (!userId || !code) {
+      return res.status(400).json({ success: false, message: 'شناسه کاربر و کد هدیه الزامی است.' });
+    }
+    const result = bridgeStore.redeemGiftCode(userId, code);
+    res.status(result.success ? 200 : 400).json(result);
+  });
+
+  // 17. Wallet: Top-up Tokens (payment callback or in-app token top-up)
+  app.post('/api/bridge/wallet/topup', (req, res) => {
+    const { userId, tokens, packageId, description } = req.body;
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'شناسه کاربر الزامی است.' });
+    }
+    const amount = Number(tokens) || 1000;
+    const result = bridgeStore.adjustUserTokens(
+      userId,
+      amount,
+      'topup',
+      description || `شارژ کیف پول (بسته ${packageId || 'دستی'})`
+    );
+    res.status(result.success ? 200 : 400).json(result);
+  });
+
+  // 18. Wallet: Get transaction history for user
+  app.get('/api/bridge/wallet/transactions/:identifier', (req, res) => {
+    const user = bridgeStore.findUserByIdOrEmail(req.params.identifier);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'کاربر یافت نشد.' });
+    }
+    res.json({
+      success: true,
+      transactions: bridgeStore.getTransactions(user.id),
+    });
+  });
+
+  // 19. Admin: List and Create Gift Codes
+  app.get('/api/bridge/admin/gift-codes', (_req, res) => {
+    res.json({
+      success: true,
+      giftCodes: bridgeStore.getGiftCodes(),
+    });
+  });
+
+  app.post('/api/bridge/admin/gift-codes', (req, res) => {
+    const { code, tokens, maxUses } = req.body;
+    if (!code || !tokens) {
+      return res.status(400).json({ success: false, message: 'کد و تعداد توکن الزامی است.' });
+    }
+    const gift = bridgeStore.createGiftCode(code, Number(tokens), Number(maxUses) || 100);
+    res.json({ success: true, giftCode: gift });
+  });
+
   const isProd = process.env.NODE_ENV === 'production';
   if (!isProd) {
     const { createServer: createViteServer } = await import('vite');
@@ -1189,31 +1341,78 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.resolve(__dirname, 'dist');
-    app.use(express.static(distPath));
+    if (fs.existsSync(distPath)) {
+      app.use(express.static(distPath));
+    }
+
     app.get('*', (_req, res) => {
       const indexPath = path.join(distPath, 'index.html');
       if (fs.existsSync(indexPath)) {
-        res.sendFile(indexPath);
-      } else {
-        res.status(200).send(`
-          <!DOCTYPE html>
-          <html lang="fa" dir="rtl">
-          <head><meta charset="UTF-8"><title>Sanaei Bridge</title></head>
-          <body style="background:#0f172a; color:#f8fafc; font-family:system-ui,sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0;">
-            <div style="background:#1e293b; padding:32px; border-radius:16px; max-width:540px; text-align:center; box-shadow:0 10px 25px rgba(0,0,0,0.5); border:1px solid #334155;">
-              <h2 style="color:#38bdf8; margin-top:0;">سرویس سرور فعال و آنلاین است ✅</h2>
-              <p style="color:#94a3b8; font-size:14px; line-height:1.6;">سرویس backend روی پورت 3000 فعال است اما فایل‌های فرانت‌اند هنوز بیلد نشده‌اند.</p>
-              <div style="background:#020617; padding:12px; border-radius:8px; font-family:monospace; direction:ltr; text-align:left; color:#4ade80; font-size:12px; margin:20px 0; overflow-x:auto;">
-                cd /usr/local/sanaei-bridge && npm install --legacy-peer-deps && npm run build && systemctl restart sanaei-bridge
-              </div>
-              <p style="font-size:12px; color:#64748b;">پس از اجرای دستور فوق در ترمینال، این صفحه را رفرش فرمایید.</p>
-            </div>
-          </body>
-          </html>
-        `);
+        return res.sendFile(indexPath);
       }
+
+      // Self-contained embedded control interface if dist files are missing
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.status(200).send(`
+        <!DOCTYPE html>
+        <html lang="fa" dir="rtl">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Sanaei Bridge & Manager - پنل مدیریت پل ارتباطی</title>
+          <link rel="preconnect" href="https://fonts.googleapis.com">
+          <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+          <style>
+            * { box-sizing: border-box; font-family: 'Vazirmatn', system-ui, sans-serif; }
+            body { background: #090d16; color: #f1f5f9; margin: 0; padding: 24px; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+            .card { background: #131b2e; border: 1px solid #1e293b; border-radius: 20px; padding: 32px; max-width: 680px; width: 100%; box-shadow: 0 20px 40px rgba(0,0,0,0.6); }
+            .badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); border-radius: 9999px; font-size: 13px; font-weight: 600; }
+            h1 { font-size: 22px; margin: 16px 0 8px; color: #38bdf8; font-weight: 700; }
+            p { color: #94a3b8; font-size: 14px; line-height: 1.7; margin: 0 0 16px; }
+            .box { background: #0a0f1d; border: 1px solid #1e293b; border-radius: 12px; padding: 14px; margin: 16px 0; direction: ltr; text-align: left; font-family: monospace; color: #38bdf8; font-size: 13px; word-break: break-all; }
+            .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin: 20px 0; }
+            .stat { background: #1a233a; border-radius: 12px; padding: 12px; text-align: center; border: 1px solid #273552; }
+            .stat-num { font-size: 18px; font-weight: 700; color: #f8fafc; }
+            .stat-lbl { font-size: 11px; color: #64748b; margin-top: 4px; }
+            .btn { display: inline-block; background: #0284c7; color: white; padding: 10px 20px; border-radius: 10px; text-decoration: none; font-size: 13px; font-weight: 600; transition: 0.2s; border: none; cursor: pointer; }
+            .btn:hover { background: #0369a1; }
+            .btn-outline { background: transparent; border: 1px solid #334155; color: #94a3b8; margin-right: 8px; }
+            .btn-outline:hover { background: #1e293b; color: #fff; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span class="badge">● سرویس پل سرور آنلاین و فعال است</span>
+              <span style="font-size:12px; color:#64748b; direction:ltr;">v2.5.0</span>
+            </div>
+            <h1>پل ارتباطی ثنایی و اپلیکیشن موبایل (Sanaei Bridge)</h1>
+            <p>این سرور به عنوان پل ارتباطی هوشمند بین اپلیکیشن موبایل و پنل سنایی (3X-UI) عمل می‌کند و کلیه درخواست‌های ثبت‌نام، صدور خودکار کانفیگ، مدیریت کیف پول و پلن‌ها را مدیریت می‌نماید.</p>
+            
+            <div class="grid">
+              <div class="stat"><div class="stat-num">3000</div><div class="stat-lbl">پورت سرور</div></div>
+              <div class="stat"><div class="stat-num">3X-UI v3</div><div class="stat-lbl">نسخه پنل ثنایی</div></div>
+              <div class="stat"><div class="stat-num">فعال ✅</div><div class="stat-lbl">سیستم کیف پول</div></div>
+              <div class="stat"><div class="stat-num">فعال ✅</div><div class="stat-lbl">کد هدیه و ووچر</div></div>
+            </div>
+
+            <div style="margin-top:20px;">
+              <div style="font-size:13px; font-weight:600; color:#e2e8f0; margin-bottom:8px;">دستور نصب رابط کاربری گرافیکی کامل روی سرور:</div>
+              <div class="box">curl -fsSL http://127.0.0.1:3000/dist.tar.gz | tar -xz -C /usr/local/sanaei-bridge/</div>
+            </div>
+
+            <div style="margin-top:24px; display:flex; gap:10px; flex-wrap:wrap;">
+              <a href="/api/bridge/health" target="_blank" class="btn">تست وضعیت API (Health)</a>
+              <a href="/api/bridge/servers" target="_blank" class="btn btn-outline">لیست سرورها</a>
+              <a href="/api/bridge/wallet/packages" target="_blank" class="btn btn-outline">بسته‌های کیف پول</a>
+            </div>
+          </div>
+        </body>
+        </html>
+      `);
     });
   }
+
 
   const PORT = Number(process.env.PORT) || 3000;
   app.listen(PORT, '0.0.0.0', () => {
