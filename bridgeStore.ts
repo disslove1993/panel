@@ -6,6 +6,7 @@ import {
   BridgeUser,
   BridgeWalletTransaction,
   BridgeGiftCode,
+  BridgePaymentOrder,
 } from './src/types/bridge';
 
 const STORE_PATH = path.resolve(process.cwd(), 'bridge_store.json');
@@ -63,6 +64,9 @@ const DEFAULT_SETTINGS: BridgeSettings = {
   sanaeiUsername: 'disslove22',
   sanaeiPassword: '199300',
   allowInsecure: true,
+  zibalMerchant: '68b314a9a45c720017ff86cb',
+  zibalEnabled: true,
+  zibalCallbackUrl: '',
   plans: DEFAULT_PLANS,
   giftCodes: [
     {
@@ -88,11 +92,19 @@ const DEFAULT_SETTINGS: BridgeSettings = {
 
 export const WALLET_PACKAGES = [
   {
+    id: 'pack_100',
+    tokens: 100,
+    priceTomans: 10000,
+    bonusTokens: 0,
+    title: 'بسته پایه ۱۰۰ توکن (۱۰ هزار تومان)',
+    isPopular: false,
+  },
+  {
     id: 'pack_1000',
     tokens: 1000,
     priceTomans: 85000,
     bonusTokens: 0,
-    title: 'بسته پایه ۱۰۰۰ توکن',
+    title: 'بسته استاندارد ۱۰۰۰ توکن',
     isPopular: false,
   },
   {
@@ -118,6 +130,7 @@ interface BridgeDatabase {
   users: Record<string, BridgeUser>;
   transactions?: BridgeWalletTransaction[];
   redeemedCodes?: Record<string, string[]>; // code -> array of userIds
+  orders?: Record<string, BridgePaymentOrder>;
 }
 
 class BridgeStoreManager {
@@ -137,6 +150,7 @@ class BridgeStoreManager {
           users: parsed.users || {},
           transactions: parsed.transactions || [],
           redeemedCodes: parsed.redeemedCodes || {},
+          orders: parsed.orders || {},
         };
       }
     } catch (err) {
@@ -147,8 +161,10 @@ class BridgeStoreManager {
       users: {},
       transactions: [],
       redeemedCodes: {},
+      orders: {},
     };
   }
+
 
   private saveToDisk() {
     try {
@@ -385,7 +401,37 @@ class BridgeStoreManager {
       message: `کد هدیه با موفقیت اعمال شد و ${gift.tokens} توکن به حساب شما افزوده گردید!`,
     };
   }
+
+  // --- Payment Orders Management (Zibal IPG) ---
+  createPaymentOrder(order: BridgePaymentOrder): BridgePaymentOrder {
+    if (!this.data.orders) this.data.orders = {};
+    this.data.orders[order.id] = order;
+    this.saveToDisk();
+    return order;
+  }
+
+  getPaymentOrder(orderId: string): BridgePaymentOrder | undefined {
+    return this.data.orders ? this.data.orders[orderId] : undefined;
+  }
+
+  findOrderByTrackId(trackId: number): BridgePaymentOrder | undefined {
+    if (!this.data.orders) return undefined;
+    return Object.values(this.data.orders).find((o) => o.trackId === trackId);
+  }
+
+  updatePaymentOrder(order: BridgePaymentOrder): BridgePaymentOrder {
+    if (!this.data.orders) this.data.orders = {};
+    this.data.orders[order.id] = order;
+    this.saveToDisk();
+    return order;
+  }
+
+  getAllPaymentOrders(): BridgePaymentOrder[] {
+    if (!this.data.orders) return [];
+    return Object.values(this.data.orders).sort((a, b) => b.createdAt - a.createdAt);
+  }
 }
+
 
 export const bridgeStore = new BridgeStoreManager();
 

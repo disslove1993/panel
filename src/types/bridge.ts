@@ -86,6 +86,21 @@ export interface BridgeWalletPackage {
   isPopular?: boolean;
 }
 
+export interface BridgePaymentOrder {
+  id: string; // e.g. ord_12345
+  userId: string;
+  userEmail: string;
+  tokens: number;
+  amountTomans: number;
+  amountRials: number;
+  trackId?: number;
+  status: 'pending' | 'paid' | 'failed';
+  refNumber?: string | number;
+  cardNumber?: string;
+  paidAt?: number;
+  createdAt: number;
+}
+
 export interface BridgeSettings {
   apiKey: string;
   adminPassword?: string;
@@ -98,5 +113,9 @@ export interface BridgeSettings {
   allowInsecure: boolean;
   plans: BridgePlan[];
   giftCodes?: BridgeGiftCode[];
+  zibalMerchant: string;
+  zibalEnabled: boolean;
+  zibalCallbackUrl?: string;
 }
+
 

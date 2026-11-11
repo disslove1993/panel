@@ -1331,7 +1331,295 @@ async function startServer() {
     res.json({ success: true, giftCode: gift });
   });
 
+  // 20. Zibal IPG: Get Available Packages for Real Money Payment
+  app.get('/api/bridge/payment/packages', (_req, res) => {
+    res.json({
+      success: true,
+      packages: WALLET_PACKAGES,
+      gateway: {
+        name: 'Zibal IPG (درگاه پرداخت آنلاین زیبال)',
+        enabled: bridgeStore.getSettings().zibalEnabled ?? true,
+        merchantConfigured: !!bridgeStore.getSettings().zibalMerchant,
+      },
+    });
+  });
+
+  // 21. Zibal IPG: Initiate Real Payment (User wants to buy tokens with real money)
+  app.post('/api/bridge/payment/initiate', async (req, res) => {
+    try {
+      const { userId, packageId, tokens: customTokens, mobile, callbackUrlOverride } = req.body;
+      const user = bridgeStore.findUserByIdOrEmail(userId);
+      if (!user) {
+        return res.status(404).json({ success: false, message: 'کاربر برای پرداخت یافت نشد.' });
+      }
+
+      const settings = bridgeStore.getSettings();
+      const merchant = settings.zibalMerchant || '68b314a9a45c720017ff86cb';
+
+      let tokens = 100;
+      let amountTomans = 10000;
+
+      if (packageId) {
+        const pack = WALLET_PACKAGES.find((p) => p.id === packageId);
+        if (pack) {
+          tokens = pack.tokens + (pack.bonusTokens || 0);
+          amountTomans = pack.priceTomans;
+        }
+      } else if (customTokens && Number(customTokens) > 0) {
+        tokens = Number(customTokens);
+        // Default conversion: 100 tokens = 10,000 Tomans (1 token = 100 Tomans)
+        amountTomans = tokens * 100;
+      }
+
+      // Convert Tomans to Rials (1 Toman = 10 Rials)
+      const amountRials = amountTomans * 10;
+      if (amountRials < 1000) {
+        return res.status(400).json({ success: false, message: 'حداقل مبلغ پرداخت ۱۰۰۰ ریال است.' });
+      }
+
+      const orderId = `ORD_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+      const host = req.get('host') || '130.185.121.250:3000';
+      const defaultCallback = `${protocol}://${host}/api/bridge/payment/callback`;
+      const callbackUrl = callbackUrlOverride || settings.zibalCallbackUrl || defaultCallback;
+
+      // Call Zibal /v1/request
+      const zibalReqBody = JSON.stringify({
+        merchant,
+        amount: amountRials,
+        callbackUrl,
+        description: `خرید ${tokens} توکن برای کاربر ${user.name} (${user.email})`,
+        orderId,
+        mobile: mobile || undefined,
+      });
+
+      const zibalResponse = await performHttpRequest('https://gateway.zibal.ir/v1/request', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: zibalReqBody,
+        timeoutMs: 10000,
+      });
+
+      let zibalData: any = {};
+      try {
+        zibalData = JSON.parse(zibalResponse.body);
+      } catch {
+        return res.status(502).json({
+          success: false,
+          message: 'پاسخ نامعتبر از درگاه زیبال دریافت شد: ' + zibalResponse.body,
+        });
+      }
+
+      if (zibalData.result !== 100) {
+        const errorMessages: Record<number, string> = {
+          102: 'کد مرچنت در درگاه زیبال یافت نشد (کد مرچنت در تنظیمات مدیریت را بررسی کنید).',
+          103: 'درگاه زیبال غیرفعال است یا قرارداد امضا نشده است.',
+          104: 'کد مرچنت زیبال نامعتبر است.',
+          105: 'مبلغ سفارش کمتر از حداقل مجاز (۱۰۰۰ ریال) است.',
+          106: 'آدرس بازگشت (Callback URL) نامعتبر است.',
+          113: 'مبلغ تراکنش بیش از سقف مجاز است.',
+          115: 'آی‌پی سرور در پنل زیبال ثبت نشده است.',
+        };
+        const msg = errorMessages[zibalData.result] || zibalData.message || `خطای درگاه زیبال (کد ${zibalData.result})`;
+        return res.status(400).json({ success: false, message: msg, result: zibalData.result });
+      }
+
+      const trackId = Number(zibalData.trackId);
+      const paymentUrl = `https://gateway.zibal.ir/start/${trackId}`;
+
+      // Store pending order
+      bridgeStore.createPaymentOrder({
+        id: orderId,
+        userId: user.id,
+        userEmail: user.email,
+        tokens,
+        amountTomans,
+        amountRials,
+        trackId,
+        status: 'pending',
+        createdAt: Date.now(),
+      });
+
+      res.json({
+        success: true,
+        orderId,
+        trackId,
+        paymentUrl,
+        tokens,
+        amountTomans,
+        amountRials,
+        message: 'شناسه پرداخت با موفقیت از زیبال دریافت شد.',
+      });
+    } catch (err: any) {
+      console.error('Error initiating payment:', err);
+      res.status(500).json({ success: false, message: err?.message || 'خطا در ارتباط با درگاه پرداخت زیبال' });
+    }
+  });
+
+  // 22. Zibal IPG: Callback Handler (User returns from bank gateway)
+  app.get('/api/bridge/payment/callback', async (req, res) => {
+    const trackId = req.query.trackId ? Number(req.query.trackId) : undefined;
+    const success = req.query.success === '1';
+    const orderId = req.query.orderId ? String(req.query.orderId) : undefined;
+
+    let order = orderId ? bridgeStore.getPaymentOrder(orderId) : undefined;
+    if (!order && trackId) {
+      order = bridgeStore.findOrderByTrackId(trackId);
+    }
+
+    const settings = bridgeStore.getSettings();
+    const merchant = settings.zibalMerchant || '68b314a9a45c720017ff86cb';
+
+    let isVerified = false;
+    let refNumber = '';
+    let cardNumber = '';
+    let errorMessage = '';
+
+    if (success && trackId) {
+      try {
+        const verifyResponse = await performHttpRequest('https://gateway.zibal.ir/v1/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            merchant,
+            trackId,
+          }),
+          timeoutMs: 10000,
+        });
+
+        const verifyData = JSON.parse(verifyResponse.body || '{}');
+        if (verifyData.result === 100 || verifyData.result === 201) {
+          isVerified = true;
+          refNumber = String(verifyData.refNumber || '');
+          cardNumber = String(verifyData.cardNumber || '');
+
+          if (order && order.status !== 'paid') {
+            order.status = 'paid';
+            order.refNumber = refNumber;
+            order.cardNumber = cardNumber;
+            order.paidAt = Date.now();
+            bridgeStore.updatePaymentOrder(order);
+
+            // Add tokens to user
+            bridgeStore.adjustUserTokens(
+              order.userId,
+              order.tokens,
+              'topup',
+              `پرداخت آنلاین زیبال (پیگیری: ${refNumber})`
+            );
+          }
+        } else {
+          errorMessage = verifyData.message || `کد نتیجه تایید: ${verifyData.result}`;
+        }
+      } catch (err: any) {
+        errorMessage = err?.message || 'خطا در تایید تراکنش در زیبال';
+      }
+    } else {
+      errorMessage = 'تراکنش توسط کاربر لغو شد یا ناموفق بود.';
+      if (order && order.status !== 'paid') {
+        order.status = 'failed';
+        bridgeStore.updatePaymentOrder(order);
+      }
+    }
+
+    // Render receipt page for mobile browser / WebView
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.status(200).send(`
+      <!DOCTYPE html>
+      <html lang="fa" dir="rtl">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${isVerified ? 'پرداخت موفق' : 'پرداخت ناموفق'} - درگاه زیبال</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;700;900&display=swap" rel="stylesheet">
+        <style>
+          * { box-sizing: border-box; font-family: 'Vazirmatn', system-ui, sans-serif; }
+          body { background: #090d16; color: #f1f5f9; margin: 0; padding: 20px; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+          .card { background: #131b2e; border: 1px solid ${isVerified ? 'rgba(34,197,94,0.4)' : 'rgba(239,68,68,0.4)'}; border-radius: 24px; padding: 32px 24px; max-width: 440px; width: 100%; text-align: center; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
+          .icon-circle { width: 72px; height: 72px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 36px; background: ${isVerified ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)'}; border: 2px solid ${isVerified ? '#22c55e' : '#ef4444'}; }
+          h1 { font-size: 20px; margin: 0 0 8px; color: ${isVerified ? '#4ade80' : '#f87171'}; font-weight: 800; }
+          p { font-size: 13px; color: #94a3b8; margin: 0 0 24px; line-height: 1.6; }
+          .receipt { background: #0a0f1d; border: 1px solid #1e293b; border-radius: 16px; padding: 16px; text-align: right; margin-bottom: 24px; font-size: 13px; }
+          .receipt-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #1a233a; }
+          .receipt-row:last-child { border-bottom: none; }
+          .label { color: #64748b; }
+          .val { font-weight: 600; color: #f8fafc; font-mono: monospace; }
+          .btn { display: block; width: 100%; padding: 14px; border-radius: 14px; background: ${isVerified ? '#0284c7' : '#334155'}; color: white; text-decoration: none; font-weight: 700; font-size: 14px; border: none; cursor: pointer; transition: 0.2s; }
+          .btn:hover { opacity: 0.9; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <div class="icon-circle">${isVerified ? '✓' : '✕'}</div>
+          <h1>${isVerified ? 'پرداخت شما با موفقیت انجام شد' : 'پرداخت ناموفق بود'}</h1>
+          <p>${isVerified ? 'حساب شما با موفقیت شارژ گردید و توکن‌ها افزوده شدند.' : errorMessage}</p>
+
+          <div class="receipt">
+            <div class="receipt-row">
+              <span class="label">تعداد توکن شارژ شده:</span>
+              <span class="val" style="color:#f59e0b;">+${order ? order.tokens : 0} توکن</span>
+            </div>
+            <div class="receipt-row">
+              <span class="label">مبلغ پرداختی:</span>
+              <span class="val">${order ? order.amountTomans.toLocaleString() : 0} تومان</span>
+            </div>
+            ${refNumber ? `
+            <div class="receipt-row">
+              <span class="label">شماره پیگیری تراکنش:</span>
+              <span class="val" style="direction:ltr;">${refNumber}</span>
+            </div>` : ''}
+            ${cardNumber ? `
+            <div class="receipt-row">
+              <span class="label">شماره کارت پرداخت‌کننده:</span>
+              <span class="val" style="direction:ltr;">${cardNumber}</span>
+            </div>` : ''}
+            <div class="receipt-row">
+              <span class="label">شناسه سفارش:</span>
+              <span class="val" style="direction:ltr; font-size:11px;">${order ? order.id : (orderId || '-')}</span>
+            </div>
+          </div>
+
+          <button onclick="window.close(); window.location.href='app://payment-success?orderId=${order ? order.id : ''}&status=${isVerified ? 'paid' : 'failed'}';" class="btn">
+            بازگشت به اپلیکیشن
+          </button>
+        </div>
+      </body>
+      </html>
+    `);
+  });
+
+  // 23. Zibal IPG: Query Payment Order Status (for in-app polling)
+  app.get('/api/bridge/payment/status/:orderId', (req, res) => {
+    const order = bridgeStore.getPaymentOrder(req.params.orderId);
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'سفارش پرداخت یافت نشد.' });
+    }
+    const user = bridgeStore.findUserByIdOrEmail(order.userId);
+    res.json({
+      success: true,
+      order,
+      userTokens: user ? user.tokens : 0,
+      isPaid: order.status === 'paid',
+    });
+  });
+
+  // 24. Admin Settings: Update Zibal Merchant & Config
+  app.post('/api/bridge/admin/settings', (req, res) => {
+    const { zibalMerchant, zibalEnabled, zibalCallbackUrl, welcomeTokens } = req.body;
+    const updated = bridgeStore.updateSettings({
+      ...(zibalMerchant !== undefined ? { zibalMerchant: String(zibalMerchant).trim() } : {}),
+      ...(zibalEnabled !== undefined ? { zibalEnabled: Boolean(zibalEnabled) } : {}),
+      ...(zibalCallbackUrl !== undefined ? { zibalCallbackUrl: String(zibalCallbackUrl).trim() } : {}),
+      ...(welcomeTokens !== undefined ? { welcomeTokens: Number(welcomeTokens) || 1000 } : {}),
+    });
+    res.json({ success: true, settings: updated });
+  });
+
   const isProd = process.env.NODE_ENV === 'production';
+
   if (!isProd) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({

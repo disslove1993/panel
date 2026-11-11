@@ -65,6 +65,9 @@ var DEFAULT_SETTINGS = {
   sanaeiUsername: "disslove22",
   sanaeiPassword: "199300",
   allowInsecure: true,
+  zibalMerchant: "68b314a9a45c720017ff86cb",
+  zibalEnabled: true,
+  zibalCallbackUrl: "",
   plans: DEFAULT_PLANS,
   giftCodes: [
     {
@@ -89,11 +92,19 @@ var DEFAULT_SETTINGS = {
 };
 var WALLET_PACKAGES = [
   {
+    id: "pack_100",
+    tokens: 100,
+    priceTomans: 1e4,
+    bonusTokens: 0,
+    title: "\u0628\u0633\u062A\u0647 \u067E\u0627\u06CC\u0647 \u06F1\u06F0\u06F0 \u062A\u0648\u06A9\u0646 (\u06F1\u06F0 \u0647\u0632\u0627\u0631 \u062A\u0648\u0645\u0627\u0646)",
+    isPopular: false
+  },
+  {
     id: "pack_1000",
     tokens: 1e3,
     priceTomans: 85e3,
     bonusTokens: 0,
-    title: "\u0628\u0633\u062A\u0647 \u067E\u0627\u06CC\u0647 \u06F1\u06F0\u06F0\u06F0 \u062A\u0648\u06A9\u0646",
+    title: "\u0628\u0633\u062A\u0647 \u0627\u0633\u062A\u0627\u0646\u062F\u0627\u0631\u062F \u06F1\u06F0\u06F0\u06F0 \u062A\u0648\u06A9\u0646",
     isPopular: false
   },
   {
@@ -126,7 +137,8 @@ var BridgeStoreManager = class {
           settings: { ...DEFAULT_SETTINGS, ...parsed.settings || {} },
           users: parsed.users || {},
           transactions: parsed.transactions || [],
-          redeemedCodes: parsed.redeemedCodes || {}
+          redeemedCodes: parsed.redeemedCodes || {},
+          orders: parsed.orders || {}
         };
       }
     } catch (err) {
@@ -136,7 +148,8 @@ var BridgeStoreManager = class {
       settings: DEFAULT_SETTINGS,
       users: {},
       transactions: [],
-      redeemedCodes: {}
+      redeemedCodes: {},
+      orders: {}
     };
   }
   saveToDisk() {
@@ -343,6 +356,30 @@ var BridgeStoreManager = class {
       newTokens: user.tokens,
       message: `\u06A9\u062F \u0647\u062F\u06CC\u0647 \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u0627\u0639\u0645\u0627\u0644 \u0634\u062F \u0648 ${gift.tokens} \u062A\u0648\u06A9\u0646 \u0628\u0647 \u062D\u0633\u0627\u0628 \u0634\u0645\u0627 \u0627\u0641\u0632\u0648\u062F\u0647 \u06AF\u0631\u062F\u06CC\u062F!`
     };
+  }
+  // --- Payment Orders Management (Zibal IPG) ---
+  createPaymentOrder(order) {
+    if (!this.data.orders) this.data.orders = {};
+    this.data.orders[order.id] = order;
+    this.saveToDisk();
+    return order;
+  }
+  getPaymentOrder(orderId) {
+    return this.data.orders ? this.data.orders[orderId] : void 0;
+  }
+  findOrderByTrackId(trackId) {
+    if (!this.data.orders) return void 0;
+    return Object.values(this.data.orders).find((o) => o.trackId === trackId);
+  }
+  updatePaymentOrder(order) {
+    if (!this.data.orders) this.data.orders = {};
+    this.data.orders[order.id] = order;
+    this.saveToDisk();
+    return order;
+  }
+  getAllPaymentOrders() {
+    if (!this.data.orders) return [];
+    return Object.values(this.data.orders).sort((a, b) => b.createdAt - a.createdAt);
   }
 };
 var bridgeStore = new BridgeStoreManager();
@@ -1704,6 +1741,257 @@ async function startServer() {
     }
     const gift = bridgeStore.createGiftCode(code, Number(tokens), Number(maxUses) || 100);
     res.json({ success: true, giftCode: gift });
+  });
+  app.get("/api/bridge/payment/packages", (_req, res) => {
+    res.json({
+      success: true,
+      packages: WALLET_PACKAGES,
+      gateway: {
+        name: "Zibal IPG (\u062F\u0631\u06AF\u0627\u0647 \u067E\u0631\u062F\u0627\u062E\u062A \u0622\u0646\u0644\u0627\u06CC\u0646 \u0632\u06CC\u0628\u0627\u0644)",
+        enabled: bridgeStore.getSettings().zibalEnabled ?? true,
+        merchantConfigured: !!bridgeStore.getSettings().zibalMerchant
+      }
+    });
+  });
+  app.post("/api/bridge/payment/initiate", async (req, res) => {
+    try {
+      const { userId, packageId, tokens: customTokens, mobile, callbackUrlOverride } = req.body;
+      const user = bridgeStore.findUserByIdOrEmail(userId);
+      if (!user) {
+        return res.status(404).json({ success: false, message: "\u06A9\u0627\u0631\u0628\u0631 \u0628\u0631\u0627\u06CC \u067E\u0631\u062F\u0627\u062E\u062A \u06CC\u0627\u0641\u062A \u0646\u0634\u062F." });
+      }
+      const settings = bridgeStore.getSettings();
+      const merchant = settings.zibalMerchant || "68b314a9a45c720017ff86cb";
+      let tokens = 100;
+      let amountTomans = 1e4;
+      if (packageId) {
+        const pack = WALLET_PACKAGES.find((p) => p.id === packageId);
+        if (pack) {
+          tokens = pack.tokens + (pack.bonusTokens || 0);
+          amountTomans = pack.priceTomans;
+        }
+      } else if (customTokens && Number(customTokens) > 0) {
+        tokens = Number(customTokens);
+        amountTomans = tokens * 100;
+      }
+      const amountRials = amountTomans * 10;
+      if (amountRials < 1e3) {
+        return res.status(400).json({ success: false, message: "\u062D\u062F\u0627\u0642\u0644 \u0645\u0628\u0644\u063A \u067E\u0631\u062F\u0627\u062E\u062A \u06F1\u06F0\u06F0\u06F0 \u0631\u06CC\u0627\u0644 \u0627\u0633\u062A." });
+      }
+      const orderId = `ORD_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      const protocol = req.headers["x-forwarded-proto"] || req.protocol || "http";
+      const host = req.get("host") || "130.185.121.250:3000";
+      const defaultCallback = `${protocol}://${host}/api/bridge/payment/callback`;
+      const callbackUrl = callbackUrlOverride || settings.zibalCallbackUrl || defaultCallback;
+      const zibalReqBody = JSON.stringify({
+        merchant,
+        amount: amountRials,
+        callbackUrl,
+        description: `\u062E\u0631\u06CC\u062F ${tokens} \u062A\u0648\u06A9\u0646 \u0628\u0631\u0627\u06CC \u06A9\u0627\u0631\u0628\u0631 ${user.name} (${user.email})`,
+        orderId,
+        mobile: mobile || void 0
+      });
+      const zibalResponse = await performHttpRequest("https://gateway.zibal.ir/v1/request", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: zibalReqBody,
+        timeoutMs: 1e4
+      });
+      let zibalData = {};
+      try {
+        zibalData = JSON.parse(zibalResponse.body);
+      } catch {
+        return res.status(502).json({
+          success: false,
+          message: "\u067E\u0627\u0633\u062E \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0632 \u062F\u0631\u06AF\u0627\u0647 \u0632\u06CC\u0628\u0627\u0644 \u062F\u0631\u06CC\u0627\u0641\u062A \u0634\u062F: " + zibalResponse.body
+        });
+      }
+      if (zibalData.result !== 100) {
+        const errorMessages = {
+          102: "\u06A9\u062F \u0645\u0631\u0686\u0646\u062A \u062F\u0631 \u062F\u0631\u06AF\u0627\u0647 \u0632\u06CC\u0628\u0627\u0644 \u06CC\u0627\u0641\u062A \u0646\u0634\u062F (\u06A9\u062F \u0645\u0631\u0686\u0646\u062A \u062F\u0631 \u062A\u0646\u0638\u06CC\u0645\u0627\u062A \u0645\u062F\u06CC\u0631\u06CC\u062A \u0631\u0627 \u0628\u0631\u0631\u0633\u06CC \u06A9\u0646\u06CC\u062F).",
+          103: "\u062F\u0631\u06AF\u0627\u0647 \u0632\u06CC\u0628\u0627\u0644 \u063A\u06CC\u0631\u0641\u0639\u0627\u0644 \u0627\u0633\u062A \u06CC\u0627 \u0642\u0631\u0627\u0631\u062F\u0627\u062F \u0627\u0645\u0636\u0627 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A.",
+          104: "\u06A9\u062F \u0645\u0631\u0686\u0646\u062A \u0632\u06CC\u0628\u0627\u0644 \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.",
+          105: "\u0645\u0628\u0644\u063A \u0633\u0641\u0627\u0631\u0634 \u06A9\u0645\u062A\u0631 \u0627\u0632 \u062D\u062F\u0627\u0642\u0644 \u0645\u062C\u0627\u0632 (\u06F1\u06F0\u06F0\u06F0 \u0631\u06CC\u0627\u0644) \u0627\u0633\u062A.",
+          106: "\u0622\u062F\u0631\u0633 \u0628\u0627\u0632\u06AF\u0634\u062A (Callback URL) \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.",
+          113: "\u0645\u0628\u0644\u063A \u062A\u0631\u0627\u06A9\u0646\u0634 \u0628\u06CC\u0634 \u0627\u0632 \u0633\u0642\u0641 \u0645\u062C\u0627\u0632 \u0627\u0633\u062A.",
+          115: "\u0622\u06CC\u200C\u067E\u06CC \u0633\u0631\u0648\u0631 \u062F\u0631 \u067E\u0646\u0644 \u0632\u06CC\u0628\u0627\u0644 \u062B\u0628\u062A \u0646\u0634\u062F\u0647 \u0627\u0633\u062A."
+        };
+        const msg = errorMessages[zibalData.result] || zibalData.message || `\u062E\u0637\u0627\u06CC \u062F\u0631\u06AF\u0627\u0647 \u0632\u06CC\u0628\u0627\u0644 (\u06A9\u062F ${zibalData.result})`;
+        return res.status(400).json({ success: false, message: msg, result: zibalData.result });
+      }
+      const trackId = Number(zibalData.trackId);
+      const paymentUrl = `https://gateway.zibal.ir/start/${trackId}`;
+      bridgeStore.createPaymentOrder({
+        id: orderId,
+        userId: user.id,
+        userEmail: user.email,
+        tokens,
+        amountTomans,
+        amountRials,
+        trackId,
+        status: "pending",
+        createdAt: Date.now()
+      });
+      res.json({
+        success: true,
+        orderId,
+        trackId,
+        paymentUrl,
+        tokens,
+        amountTomans,
+        amountRials,
+        message: "\u0634\u0646\u0627\u0633\u0647 \u067E\u0631\u062F\u0627\u062E\u062A \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u0627\u0632 \u0632\u06CC\u0628\u0627\u0644 \u062F\u0631\u06CC\u0627\u0641\u062A \u0634\u062F."
+      });
+    } catch (err) {
+      console.error("Error initiating payment:", err);
+      res.status(500).json({ success: false, message: err?.message || "\u062E\u0637\u0627 \u062F\u0631 \u0627\u0631\u062A\u0628\u0627\u0637 \u0628\u0627 \u062F\u0631\u06AF\u0627\u0647 \u067E\u0631\u062F\u0627\u062E\u062A \u0632\u06CC\u0628\u0627\u0644" });
+    }
+  });
+  app.get("/api/bridge/payment/callback", async (req, res) => {
+    const trackId = req.query.trackId ? Number(req.query.trackId) : void 0;
+    const success = req.query.success === "1";
+    const orderId = req.query.orderId ? String(req.query.orderId) : void 0;
+    let order = orderId ? bridgeStore.getPaymentOrder(orderId) : void 0;
+    if (!order && trackId) {
+      order = bridgeStore.findOrderByTrackId(trackId);
+    }
+    const settings = bridgeStore.getSettings();
+    const merchant = settings.zibalMerchant || "68b314a9a45c720017ff86cb";
+    let isVerified = false;
+    let refNumber = "";
+    let cardNumber = "";
+    let errorMessage = "";
+    if (success && trackId) {
+      try {
+        const verifyResponse = await performHttpRequest("https://gateway.zibal.ir/v1/verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            merchant,
+            trackId
+          }),
+          timeoutMs: 1e4
+        });
+        const verifyData = JSON.parse(verifyResponse.body || "{}");
+        if (verifyData.result === 100 || verifyData.result === 201) {
+          isVerified = true;
+          refNumber = String(verifyData.refNumber || "");
+          cardNumber = String(verifyData.cardNumber || "");
+          if (order && order.status !== "paid") {
+            order.status = "paid";
+            order.refNumber = refNumber;
+            order.cardNumber = cardNumber;
+            order.paidAt = Date.now();
+            bridgeStore.updatePaymentOrder(order);
+            bridgeStore.adjustUserTokens(
+              order.userId,
+              order.tokens,
+              "topup",
+              `\u067E\u0631\u062F\u0627\u062E\u062A \u0622\u0646\u0644\u0627\u06CC\u0646 \u0632\u06CC\u0628\u0627\u0644 (\u067E\u06CC\u06AF\u06CC\u0631\u06CC: ${refNumber})`
+            );
+          }
+        } else {
+          errorMessage = verifyData.message || `\u06A9\u062F \u0646\u062A\u06CC\u062C\u0647 \u062A\u0627\u06CC\u06CC\u062F: ${verifyData.result}`;
+        }
+      } catch (err) {
+        errorMessage = err?.message || "\u062E\u0637\u0627 \u062F\u0631 \u062A\u0627\u06CC\u06CC\u062F \u062A\u0631\u0627\u06A9\u0646\u0634 \u062F\u0631 \u0632\u06CC\u0628\u0627\u0644";
+      }
+    } else {
+      errorMessage = "\u062A\u0631\u0627\u06A9\u0646\u0634 \u062A\u0648\u0633\u0637 \u06A9\u0627\u0631\u0628\u0631 \u0644\u063A\u0648 \u0634\u062F \u06CC\u0627 \u0646\u0627\u0645\u0648\u0641\u0642 \u0628\u0648\u062F.";
+      if (order && order.status !== "paid") {
+        order.status = "failed";
+        bridgeStore.updatePaymentOrder(order);
+      }
+    }
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.status(200).send(`
+      <!DOCTYPE html>
+      <html lang="fa" dir="rtl">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${isVerified ? "\u067E\u0631\u062F\u0627\u062E\u062A \u0645\u0648\u0641\u0642" : "\u067E\u0631\u062F\u0627\u062E\u062A \u0646\u0627\u0645\u0648\u0641\u0642"} - \u062F\u0631\u06AF\u0627\u0647 \u0632\u06CC\u0628\u0627\u0644</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;700;900&display=swap" rel="stylesheet">
+        <style>
+          * { box-sizing: border-box; font-family: 'Vazirmatn', system-ui, sans-serif; }
+          body { background: #090d16; color: #f1f5f9; margin: 0; padding: 20px; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+          .card { background: #131b2e; border: 1px solid ${isVerified ? "rgba(34,197,94,0.4)" : "rgba(239,68,68,0.4)"}; border-radius: 24px; padding: 32px 24px; max-width: 440px; width: 100%; text-align: center; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
+          .icon-circle { width: 72px; height: 72px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px; font-size: 36px; background: ${isVerified ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)"}; border: 2px solid ${isVerified ? "#22c55e" : "#ef4444"}; }
+          h1 { font-size: 20px; margin: 0 0 8px; color: ${isVerified ? "#4ade80" : "#f87171"}; font-weight: 800; }
+          p { font-size: 13px; color: #94a3b8; margin: 0 0 24px; line-height: 1.6; }
+          .receipt { background: #0a0f1d; border: 1px solid #1e293b; border-radius: 16px; padding: 16px; text-align: right; margin-bottom: 24px; font-size: 13px; }
+          .receipt-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #1a233a; }
+          .receipt-row:last-child { border-bottom: none; }
+          .label { color: #64748b; }
+          .val { font-weight: 600; color: #f8fafc; font-mono: monospace; }
+          .btn { display: block; width: 100%; padding: 14px; border-radius: 14px; background: ${isVerified ? "#0284c7" : "#334155"}; color: white; text-decoration: none; font-weight: 700; font-size: 14px; border: none; cursor: pointer; transition: 0.2s; }
+          .btn:hover { opacity: 0.9; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <div class="icon-circle">${isVerified ? "\u2713" : "\u2715"}</div>
+          <h1>${isVerified ? "\u067E\u0631\u062F\u0627\u062E\u062A \u0634\u0645\u0627 \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u0627\u0646\u062C\u0627\u0645 \u0634\u062F" : "\u067E\u0631\u062F\u0627\u062E\u062A \u0646\u0627\u0645\u0648\u0641\u0642 \u0628\u0648\u062F"}</h1>
+          <p>${isVerified ? "\u062D\u0633\u0627\u0628 \u0634\u0645\u0627 \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u0634\u0627\u0631\u0698 \u06AF\u0631\u062F\u06CC\u062F \u0648 \u062A\u0648\u06A9\u0646\u200C\u0647\u0627 \u0627\u0641\u0632\u0648\u062F\u0647 \u0634\u062F\u0646\u062F." : errorMessage}</p>
+
+          <div class="receipt">
+            <div class="receipt-row">
+              <span class="label">\u062A\u0639\u062F\u0627\u062F \u062A\u0648\u06A9\u0646 \u0634\u0627\u0631\u0698 \u0634\u062F\u0647:</span>
+              <span class="val" style="color:#f59e0b;">+${order ? order.tokens : 0} \u062A\u0648\u06A9\u0646</span>
+            </div>
+            <div class="receipt-row">
+              <span class="label">\u0645\u0628\u0644\u063A \u067E\u0631\u062F\u0627\u062E\u062A\u06CC:</span>
+              <span class="val">${order ? order.amountTomans.toLocaleString() : 0} \u062A\u0648\u0645\u0627\u0646</span>
+            </div>
+            ${refNumber ? `
+            <div class="receipt-row">
+              <span class="label">\u0634\u0645\u0627\u0631\u0647 \u067E\u06CC\u06AF\u06CC\u0631\u06CC \u062A\u0631\u0627\u06A9\u0646\u0634:</span>
+              <span class="val" style="direction:ltr;">${refNumber}</span>
+            </div>` : ""}
+            ${cardNumber ? `
+            <div class="receipt-row">
+              <span class="label">\u0634\u0645\u0627\u0631\u0647 \u06A9\u0627\u0631\u062A \u067E\u0631\u062F\u0627\u062E\u062A\u200C\u06A9\u0646\u0646\u062F\u0647:</span>
+              <span class="val" style="direction:ltr;">${cardNumber}</span>
+            </div>` : ""}
+            <div class="receipt-row">
+              <span class="label">\u0634\u0646\u0627\u0633\u0647 \u0633\u0641\u0627\u0631\u0634:</span>
+              <span class="val" style="direction:ltr; font-size:11px;">${order ? order.id : orderId || "-"}</span>
+            </div>
+          </div>
+
+          <button onclick="window.close(); window.location.href='app://payment-success?orderId=${order ? order.id : ""}&status=${isVerified ? "paid" : "failed"}';" class="btn">
+            \u0628\u0627\u0632\u06AF\u0634\u062A \u0628\u0647 \u0627\u067E\u0644\u06CC\u06A9\u06CC\u0634\u0646
+          </button>
+        </div>
+      </body>
+      </html>
+    `);
+  });
+  app.get("/api/bridge/payment/status/:orderId", (req, res) => {
+    const order = bridgeStore.getPaymentOrder(req.params.orderId);
+    if (!order) {
+      return res.status(404).json({ success: false, message: "\u0633\u0641\u0627\u0631\u0634 \u067E\u0631\u062F\u0627\u062E\u062A \u06CC\u0627\u0641\u062A \u0646\u0634\u062F." });
+    }
+    const user = bridgeStore.findUserByIdOrEmail(order.userId);
+    res.json({
+      success: true,
+      order,
+      userTokens: user ? user.tokens : 0,
+      isPaid: order.status === "paid"
+    });
+  });
+  app.post("/api/bridge/admin/settings", (req, res) => {
+    const { zibalMerchant, zibalEnabled, zibalCallbackUrl, welcomeTokens } = req.body;
+    const updated = bridgeStore.updateSettings({
+      ...zibalMerchant !== void 0 ? { zibalMerchant: String(zibalMerchant).trim() } : {},
+      ...zibalEnabled !== void 0 ? { zibalEnabled: Boolean(zibalEnabled) } : {},
+      ...zibalCallbackUrl !== void 0 ? { zibalCallbackUrl: String(zibalCallbackUrl).trim() } : {},
+      ...welcomeTokens !== void 0 ? { welcomeTokens: Number(welcomeTokens) || 1e3 } : {}
+    });
+    res.json({ success: true, settings: updated });
   });
   const isProd = process.env.NODE_ENV === "production";
   if (!isProd) {

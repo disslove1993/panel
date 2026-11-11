@@ -40,11 +40,17 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
   const [isLoading, setIsLoading] = useState(false);
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
 
-  // Wallet State
+  // Wallet & Zibal IPG State
   const [giftCodes, setGiftCodes] = useState<any[]>([]);
   const [newGiftCode, setNewGiftCode] = useState('');
   const [newGiftTokens, setNewGiftTokens] = useState('1000');
   const [giftStatusMsg, setGiftStatusMsg] = useState<string | null>(null);
+  const [zibalMerchant, setZibalMerchant] = useState('68b314a9a45c720017ff86cb');
+  const [zibalEnabled, setZibalEnabled] = useState(true);
+  const [paymentTesting, setPaymentTesting] = useState(false);
+  const [paymentMsg, setPaymentMsg] = useState<string | null>(null);
+  const [walletPackages, setWalletPackages] = useState<any[]>([]);
+
 
   // Simulator State
   const [simEmail, setSimEmail] = useState('user_' + Math.floor(1000 + Math.random() * 9000) + '@app.local');
@@ -121,10 +127,85 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
     }
   };
 
+  const fetchPaymentPackages = async () => {
+    try {
+      const res = await fetch('/api/bridge/payment/packages');
+      const data = await res.json();
+      if (data && data.success) {
+        setWalletPackages(data.packages || []);
+      }
+    } catch (err) {
+      console.error('Error fetching packages:', err);
+    }
+  };
+
+  const handleUpdateZibalSettings = async () => {
+    try {
+      const res = await fetch('/api/bridge/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          zibalMerchant: zibalMerchant.trim(),
+          zibalEnabled,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPaymentMsg('مرچنت کد زیبال با موفقیت ذخیره و روی سرور اعمال شد.');
+        setTimeout(() => setPaymentMsg(null), 3500);
+      }
+    } catch (err: any) {
+      setPaymentMsg(err.message || 'خطا در ذخیره تنظیمات درگاه');
+    }
+  };
+
+  const handleTestPayment = async (packageId: string) => {
+    setPaymentTesting(true);
+    setPaymentMsg('در حال اتصال به درگاه زیبال و دریافت شناسه پرداخت (trackId)...');
+    try {
+      let userToPay = simUser;
+      if (!userToPay) {
+        const regRes = await fetch('/api/bridge/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: simEmail,
+            name: simEmail.split('@')[0],
+          }),
+        });
+        const regData = await regRes.json();
+        userToPay = regData.user;
+        setSimUser(userToPay);
+      }
+
+      const res = await fetch('/api/bridge/payment/initiate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: userToPay?.id,
+          packageId,
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.paymentUrl) {
+        setPaymentMsg(`شناسه پرداخت ${data.trackId} دریافت شد. انتقال به درگاه شاپرک زیبال...`);
+        window.open(data.paymentUrl, '_blank');
+      } else {
+        setPaymentMsg(data.message || 'خطا در شروع تراکنش زیبال');
+      }
+    } catch (err: any) {
+      setPaymentMsg(err.message || 'خطا در اتصال به زیبال');
+    } finally {
+      setPaymentTesting(false);
+    }
+  };
+
   useEffect(() => {
     fetchBridgeData();
     fetchGiftCodes();
+    fetchPaymentPackages();
   }, []);
+
 
 
   // Simulator: Step 1 Register
@@ -212,27 +293,51 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
 - اکیداً هرگونه کانفیگ فیک یا ماک (مثل novashield-vpn.io یا هر URL ثابت تستی) را از کدها حذف کن! تمام کانفیگ‌ها باید ۱۰۰٪ از سرور پل ثنایی دریافت شوند.
 
 ============================================================
-۳. پیاده‌سازی کامل تب کیف پول (Wallet Tab):
+۳. پیاده‌سازی کامل تب کیف پول (Wallet) و پرداخت آنلاین با درگاه زیبال (Zibal IPG):
 ============================================================
 - در تب سوم اپلیکیشن (آیکون کیف پول Wallet)، این بخش‌ها را پیاده کن:
   ۱) نمایش موجودی توکن کاربر (هم‌خوان با نشانگر بالای برنامه، مثلاً ۱۰۰۰ Tokens).
-  ۲) بخش «کد هدیه و ووچر (Gift Voucher)»:
+  
+  ۲) بخش «خرید توکن با پول واقعی (درگاه بانکی زیبال)»:
+     - دریافت لیست بسته‌های خرید با متد: GET {BASE_URL}/api/bridge/payment/packages
+       شامل:
+       • بسته ۱۰۰ توکن = ۱۰,۰۰۰ تومان (تست)
+       • بسته ۱۰۰۰ توکن = ۸۵,۰۰۰ تومان
+       • بسته ۲۵۰۰ توکن (+۲۰۰ هدیه) = ۱۹۵,۰۰۰ تومان
+       • بسته ۵۰۰۰ توکن (+۵۰۰ هدیه) = ۳۸۰,۰۰۰ تومان
+     - با لمس هر بسته، متد زیر ارسال شود:
+       POST {BASE_URL}/api/bridge/payment/initiate
+       بدنه (JSON):
+       {
+         "userId": user.id,
+         "packageId": "pack_100" // یا pack_1000 یا تعداد دلخواه
+       }
+     - در پاسخ، سرور یک آدرس پرداخت معتبر زیبال بازمی‌گرداند:
+       {
+         "success": true,
+         "orderId": "ORD_...",
+         "trackId": 12345678,
+         "paymentUrl": "https://gateway.zibal.ir/start/12345678"
+       }
+     - برنامه این paymentUrl را از طریق Linking.openURL(paymentUrl) در مرورگر گوشی یا Chrome Custom Tabs باز کند تا کاربر در درگاه شاپرک زیبال مبلغ را واریز نماید.
+     - پس از اتمام پرداخت، سرور میانه به صورت خودکار تاییدیه (verify) را انجام داده و توکن‌ها را فوراً به حساب کاربر شارژ می‌کند.
+     - هنگام بازگشت کاربر به اپلیکیشن، متد GET {BASE_URL}/api/bridge/wallet/balance/{user.id} فراخوانی شود تا موجودی توکن جدید بلافاصله بروزرسانی گردد.
+
+  ۳) بخش «کد هدیه و ووچر (Gift Voucher)»:
      - فیلد وارد کردن کد و دکمه «اعمال کد هدیه».
-     - متد: POST به {BASE_URL}/api/bridge/wallet/redeem با بدنه: { "userId": user.id, "code": "WELCOME2026" }
-     - در صورت موفقیت، توکن‌های اضافه شده را فوراً به موجودی کیف پول کاربر بیفزا و پیام موفقیت نشان بده.
-  ۳) بخش «بسته‌های شارژ توکن»:
-     - متد: GET از {BASE_URL}/api/bridge/wallet/packages
-     - نمایش بسته‌های ۱۰۰۰ توکن، ۲۵۰۰ توکن و ۵۰۰۰ توکن با قیمت تومان.
-     - با کلیک روی هر بسته، متد POST به {BASE_URL}/api/bridge/wallet/topup ارسال شود تا موجودی افزایش یابد.
+     - متد: POST به {BASE_URL}/api/bridge/wallet/redeem با بدنه: { "userId": user.id, "code": "کد وارد شده" }
+     - کدهای تست فعال: WELCOME2026 و FREE1000 هر کدام ۱۰۰۰ توکن رایگان.
+
   ۴) تاریخچه تراکنش‌ها (Transactions):
      - متد: GET از {BASE_URL}/api/bridge/wallet/transactions/{user.id}
-     - نمایش لیست هدیه خوش‌آمدگویی، اعمال کدهای تخفیف و خریدهای اشتراک.
+     - نمایش تاریخچه پرداخت‌های آنلاین درگاه زیبال، هدایای خوش‌آمدگویی و خریدهای اشتراک.
 
 ============================================================
 ۴. نحوه اتصال مستقیم VPN (دکمه Tap to Connect):
 ============================================================
 - اگر کاربر اشتراک فعال دارد (user.subscription.status === 'active')، با کلیک روی دکمه بزرگ دایره‌ای، مستقیماً از رشته configUri دریافت شده از ثنایی (vless://...) برای استارت هسته VPN استفاده کن.
-- اگر اشتراک نداشت، لیست پلن‌ها (GET /api/bridge/plans) را باز کن تا با موجودی توکنش (۱۰۰۰ توکن رایگان هدیه) اشتراک ۱ ماهه ۱۰ گیگ را فعال کند.`;
+- اگر اشتراک نداشت، لیست پلن‌ها (GET /api/bridge/plans) را باز کن تا با توکن‌های خریداری شده یا هدیه‌اش (۱۰۰۰ توکن) اشتراک ۱ ماهه ۱۰ گیگ را فعال کند.`;
+
 
 
   return (
@@ -1245,9 +1350,139 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
               ))}
             </div>
           </div>
+
+          {/* Real Money Token Purchase with Zibal IPG Section */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
+              <div>
+                <div className="flex items-center gap-2 text-xs font-semibold text-emerald-500 mb-1">
+                  <Shield className="w-4 h-4" />
+                  <span>درگاه پرداخت اینترنتی زیبال (Zibal IPG & Shaparak)</span>
+                </div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                  <Zap className="w-5 h-5 text-sky-500" />
+                  <span>تنظیمات درگاه زیبال و خرید توکن با پول واقعی</span>
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  کاربر در اپلیکیشن بسته مورد نظر را لمس می‌کند، به درگاه شاپرک زیبال متصل می‌شود و پس از پرداخت وجه، موجودی توکن به صورت آنی و خودکار در دیتابیس شارژ می‌گردد.
+                </p>
+              </div>
+
+              {paymentMsg && (
+                <div className="text-xs px-3.5 py-2 rounded-xl bg-sky-500/10 text-sky-400 border border-sky-500/30 max-w-md">
+                  {paymentMsg}
+                </div>
+              )}
+            </div>
+
+            {/* Merchant Configuration Bar */}
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 rounded-xl flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="text-xs text-slate-600 dark:text-slate-300 font-medium">کد مرچنت درگاه زیبال (Merchant ID):</span>
+                <input
+                  type="text"
+                  value={zibalMerchant}
+                  onChange={(e) => setZibalMerchant(e.target.value)}
+                  placeholder="مثلاً 68b314a9a45c720017ff86cb یا zibal برای تست"
+                  className="px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500 w-72"
+                  dir="ltr"
+                />
+                <button
+                  type="button"
+                  onClick={handleUpdateZibalSettings}
+                  className="px-3.5 py-1.5 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs rounded-lg transition-all shadow"
+                >
+                  ذخیره مرچنت
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setZibalMerchant('zibal');
+                    handleUpdateZibalSettings();
+                  }}
+                  className="px-3 py-1.5 text-xs bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 rounded-lg text-slate-700 dark:text-slate-200 transition-colors"
+                >
+                  سوییچ به درگاه تستی (zibal)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setZibalMerchant('68b314a9a45c720017ff86cb');
+                    handleUpdateZibalSettings();
+                  }}
+                  className="px-3 py-1.5 text-xs bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 rounded-lg transition-colors font-medium"
+                >
+                  مرچنت رسمی شما
+                </button>
+              </div>
+            </div>
+
+            {/* Token Packages Display with Live Test Button */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 pt-2">
+              {(walletPackages.length > 0 ? walletPackages : [
+                { id: 'pack_100', tokens: 100, priceTomans: 10000, title: 'بسته ۱۰۰ توکن', isPopular: false },
+                { id: 'pack_1000', tokens: 1000, priceTomans: 85000, title: 'بسته ۱۰۰۰ توکن', isPopular: false },
+                { id: 'pack_2500', tokens: 2500, priceTomans: 195000, title: 'بسته ۲۵۰۰ توکن (+۲۰۰)', isPopular: true },
+                { id: 'pack_5000', tokens: 5000, priceTomans: 380000, title: 'بسته ۵۰۰۰ توکن (+۵۰۰)', isPopular: false },
+              ]).map((pkg) => (
+                <div
+                  key={pkg.id}
+                  className={`p-5 rounded-2xl border flex flex-col justify-between transition-all ${
+                    pkg.id === 'pack_100'
+                      ? 'bg-gradient-to-br from-emerald-500/10 via-slate-900 to-slate-900 border-emerald-500/50 ring-1 ring-emerald-500/30'
+                      : pkg.isPopular
+                      ? 'bg-sky-950/20 border-sky-500/50 ring-1 ring-sky-500/20'
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'
+                  }`}
+                >
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-bold text-slate-900 dark:text-slate-100">{pkg.title}</span>
+                      {pkg.id === 'pack_100' && (
+                        <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/20 px-2 py-0.5 rounded-full">
+                          درخواستی شما
+                        </span>
+                      )}
+                      {pkg.isPopular && (
+                        <span className="text-[10px] font-semibold text-sky-400 bg-sky-500/10 px-2 py-0.5 rounded-full">
+                          پیشنهادی
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="text-2xl font-black font-mono text-amber-500 my-2">
+                      {pkg.tokens.toLocaleString()} <span className="text-xs text-slate-400">توکن</span>
+                    </div>
+
+                    <div className="text-sm font-bold text-slate-900 dark:text-slate-100 mb-4 font-mono">
+                      {pkg.priceTomans.toLocaleString()} <span className="text-xs text-slate-400">تومان</span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={paymentTesting}
+                    onClick={() => handleTestPayment(pkg.id)}
+                    className={`w-full py-2.5 px-3 rounded-xl text-xs font-bold transition-all shadow flex items-center justify-center gap-1.5 ${
+                      pkg.id === 'pack_100'
+                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30'
+                        : 'bg-sky-600 hover:bg-sky-500 text-white shadow-sky-600/30'
+                    }`}
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>تست پرداخت درگاه زیبال</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </div>
   );
 };
+
 
