@@ -52,27 +52,33 @@ show_menu() {
             
             # 1. Try pulling from GitHub if connected
             git pull > /dev/null 2>&1 || true
-            
-            # 2. Download pre-compiled server.js directly from live cloud
-            echo -e "${YELLOW}[1/3] Daryafte jadidtarin haste server (server.js)...${PLAIN}"
-            if curl -fsSL "${LIVE_URL}/server.js" -o "${INSTALL_DIR}/server.js.new" 2>/dev/null; then
-                if [ -s "${INSTALL_DIR}/server.js.new" ]; then
-                    mv -f "${INSTALL_DIR}/server.js.new" "${INSTALL_DIR}/server.js"
-                    sed -i 's/.*from ["'"'"']vite["'"'"'].*//g' "${INSTALL_DIR}/server.js"
-                    echo -e "${GREEN}File server.js ba movafaghiat berooz shod.${PLAIN}"
-                fi
-            fi
 
-            # 3. Download pre-built frontend dist.tar.gz and extract into dist/
-            echo -e "${YELLOW}[2/3] Daryafte jadidtarin rabet karbari (dist.tar.gz)...${PLAIN}"
+            # 2. Download pre-built frontend + server bundle (dist.tar.gz) and extract into dist/
+            echo -e "${YELLOW}[1/3] Daryafte بسته کامل رابط کاربری و هسته سرور (dist.tar.gz)...${PLAIN}"
             mkdir -p "${INSTALL_DIR}/dist"
             if curl -fsSL "${LIVE_URL}/dist.tar.gz" -o /tmp/cheshmak-dist.tar.gz 2>/dev/null; then
                 tar -xzf /tmp/cheshmak-dist.tar.gz -C "${INSTALL_DIR}/dist"
                 rm -f /tmp/cheshmak-dist.tar.gz
-                echo -e "${GREEN}File-haye frontend (dist) ba movafaghiat berooz shod.${PLAIN}"
+                if [ -s "${INSTALL_DIR}/dist/server.js" ]; then
+                    cp -f "${INSTALL_DIR}/dist/server.js" "${INSTALL_DIR}/server.js"
+                fi
+                echo -e "${GREEN}File-haye frontend (dist) va server.js ba movafaghiat estekhraj shod.${PLAIN}"
             elif [ -f "${INSTALL_DIR}/public/dist.tar.gz" ]; then
                 tar -xzf "${INSTALL_DIR}/public/dist.tar.gz" -C "${INSTALL_DIR}/dist"
+                if [ -s "${INSTALL_DIR}/dist/server.js" ]; then
+                    cp -f "${INSTALL_DIR}/dist/server.js" "${INSTALL_DIR}/server.js"
+                fi
             fi
+
+            # 3. Also download latest server.js directly
+            echo -e "${YELLOW}[2/3] Beroozresani haste server (server.js)...${PLAIN}"
+            if curl -fsSL "${LIVE_URL}/server.js" -o "${INSTALL_DIR}/server.js.new" 2>/dev/null; then
+                if [ -s "${INSTALL_DIR}/server.js.new" ]; then
+                    mv -f "${INSTALL_DIR}/server.js.new" "${INSTALL_DIR}/server.js"
+                    echo -e "${GREEN}File server.js ba movafaghiat berooz shod.${PLAIN}"
+                fi
+            fi
+            sed -i 's/.*from ["'"'"']vite["'"'"'].*//g' "${INSTALL_DIR}/server.js" 2>/dev/null || true
 
             # 4. Also self-update CLI script
             curl -fsSL "${LIVE_URL}/sanaei-bridge.sh" -o /usr/local/bin/sanaei-bridge 2>/dev/null && chmod +x /usr/local/bin/sanaei-bridge || true

@@ -247,7 +247,7 @@ class BridgeStoreManager {
 
   // --- Wallet Packages CRUD ---
   getWalletPackages(): BridgeWalletPackage[] {
-    if (!this.data.settings.walletPackages || this.data.settings.walletPackages.length === 0) {
+    if (!Array.isArray(this.data.settings.walletPackages)) {
       this.data.settings.walletPackages = [...WALLET_PACKAGES];
     }
     return this.data.settings.walletPackages;

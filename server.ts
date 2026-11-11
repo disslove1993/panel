@@ -1254,11 +1254,12 @@ async function startServer() {
   // 5.2. Admin Plan Management (Add, Update, Delete Plans)
   app.post('/api/bridge/admin/plans/add', (req, res) => {
     try {
-      const { name, periodDays, trafficGB, priceTokens, priceTomans, inboundId, isPopular, description } = req.body;
+      const body = req.body.planData || req.body;
+      const { id: customId, name, periodDays, trafficGB, priceTokens, priceTomans, inboundId, isPopular, description } = body;
       if (!name || Number(periodDays) <= 0 || Number(trafficGB) <= 0) {
         return res.status(400).json({ success: false, message: 'نام پلن، مدت اعتبار و حجم گیگابایت الزامی هستند.' });
       }
-      const id = `plan_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      const id = customId ? String(customId).trim() : `plan_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       const newPlan: BridgePlan = {
         id,
         name: String(name).trim(),
@@ -1271,7 +1272,7 @@ async function startServer() {
         description: description ? String(description).trim() : '',
       };
       bridgeStore.addPlan(newPlan);
-      res.json({ success: true, plan: newPlan, message: 'پلن جدید با موفقیت ایجاد گردید.' });
+      res.json({ success: true, plan: newPlan, plans: bridgeStore.getPlans(), message: 'پلن جدید با موفقیت ایجاد گردید.' });
     } catch (err: any) {
       res.status(500).json({ success: false, message: err?.message || 'خطا در ثبت پلن' });
     }
@@ -1279,11 +1280,13 @@ async function startServer() {
 
   app.post('/api/bridge/admin/plans/update', (req, res) => {
     try {
-      const { id, name, periodDays, trafficGB, priceTokens, priceTomans, inboundId, isPopular, description } = req.body;
-      if (!id) {
+      const targetId = req.body.planId || req.body.id || req.body.planData?.id;
+      const body = req.body.planData || req.body;
+      const { name, periodDays, trafficGB, priceTokens, priceTomans, inboundId, isPopular, description } = body;
+      if (!targetId) {
         return res.status(400).json({ success: false, message: 'شناسه پلن الزامی است.' });
       }
-      const updated = bridgeStore.updatePlan(id, {
+      const updated = bridgeStore.updatePlan(String(targetId), {
         ...(name !== undefined ? { name: String(name).trim() } : {}),
         ...(periodDays !== undefined ? { periodDays: Number(periodDays) } : {}),
         ...(trafficGB !== undefined ? { trafficGB: Number(trafficGB) } : {}),
@@ -1296,7 +1299,7 @@ async function startServer() {
       if (!updated) {
         return res.status(404).json({ success: false, message: 'پلن یافت نشد.' });
       }
-      res.json({ success: true, plan: updated, message: 'پلن با موفقیت ویرایش شد.' });
+      res.json({ success: true, plan: updated, plans: bridgeStore.getPlans(), message: 'پلن با موفقیت ویرایش شد.' });
     } catch (err: any) {
       res.status(500).json({ success: false, message: err?.message || 'خطا در ویرایش پلن' });
     }
@@ -1308,7 +1311,7 @@ async function startServer() {
       return res.status(400).json({ success: false, message: 'شناسه پلن الزامی است.' });
     }
     const ok = bridgeStore.deletePlan(planId);
-    res.json({ success: ok, message: ok ? 'پلن با موفقیت حذف شد.' : 'پلن یافت نشد.' });
+    res.json({ success: ok, plans: bridgeStore.getPlans(), message: ok ? 'پلن با موفقیت حذف شد.' : 'پلن یافت نشد.' });
   });
 
   // 5.3. Admin User Deletion (Supports POST and DELETE)
@@ -1443,7 +1446,12 @@ async function startServer() {
         success: true,
         users,
         plans,
-        settings,
+        walletPackages: bridgeStore.getWalletPackages(),
+        settings: {
+          ...settings,
+          walletPackages: bridgeStore.getWalletPackages(),
+          giftCodes: bridgeStore.getGiftCodes(),
+        },
         servers: formatServersList(inbounds),
         stats: {
           totalUsers: users.length,
@@ -1489,7 +1497,7 @@ async function startServer() {
       status: 'ok',
       online: true,
       server: 'Sanaei Mobile App Bridge',
-      version: '2.5.0',
+      version: '3.0.0',
       timestamp: Date.now(),
       sanaeiConnected: true,
       welcomeTokens: bridgeStore.getSettings().welcomeTokens,
@@ -1535,7 +1543,83 @@ async function startServer() {
   app.get('/api/bridge/wallet/packages', (_req, res) => {
     res.json({
       success: true,
-      packages: WALLET_PACKAGES,
+      packages: bridgeStore.getWalletPackages(),
+    });
+  });
+
+  // 15.1. Admin Wallet Package Management (Add, Update, Delete Wallet Packages)
+  app.post('/api/bridge/admin/wallet/packages/add', (req, res) => {
+    try {
+      const body = req.body.packageData || req.body;
+      const pkgTitle = body.title || body.name;
+      const { id, tokens, priceTomans, bonusTokens, isPopular } = body;
+      if (!pkgTitle || Number(tokens) <= 0 || Number(priceTomans) <= 0) {
+        return res.status(400).json({ success: false, message: 'عنوان بسته، تعداد توکن و قیمت تومانی الزامی است.' });
+      }
+      const newPkg = {
+        id: id ? String(id).trim() : `pack_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        title: String(pkgTitle).trim(),
+        tokens: Number(tokens),
+        priceTomans: Number(priceTomans),
+        bonusTokens: Math.max(0, Number(bonusTokens) || 0),
+        isPopular: Boolean(isPopular),
+      };
+      bridgeStore.addWalletPackage(newPkg);
+      const packages = bridgeStore.getWalletPackages();
+      res.json({ success: true, package: newPkg, packages, message: 'بسته کیف پول با موفقیت اضافه شد.' });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err?.message || 'خطا در افزودن بسته کیف پول' });
+    }
+  });
+
+  app.post('/api/bridge/admin/wallet/packages/update', (req, res) => {
+    try {
+      const pkgId = req.body.packageId || req.body.id || req.body.packageData?.id;
+      const data = req.body.packageData || req.body;
+      const pkgTitle = data.title !== undefined ? data.title : data.name;
+      if (!pkgId) {
+        return res.status(400).json({ success: false, message: 'شناسه بسته الزامی است.' });
+      }
+      const updated = bridgeStore.updateWalletPackage(String(pkgId), {
+        ...(pkgTitle !== undefined ? { title: String(pkgTitle).trim() } : {}),
+        ...(data.tokens !== undefined ? { tokens: Number(data.tokens) } : {}),
+        ...(data.priceTomans !== undefined ? { priceTomans: Number(data.priceTomans) } : {}),
+        ...(data.bonusTokens !== undefined ? { bonusTokens: Math.max(0, Number(data.bonusTokens) || 0) } : {}),
+        ...(data.isPopular !== undefined ? { isPopular: Boolean(data.isPopular) } : {}),
+      });
+      if (!updated) {
+        return res.status(404).json({ success: false, message: 'بسته مورد نظر یافت نشد.' });
+      }
+      res.json({
+        success: true,
+        package: updated,
+        packages: bridgeStore.getWalletPackages(),
+        message: 'بسته کیف پول با موفقیت ویرایش شد.',
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err?.message || 'خطا در ویرایش بسته کیف پول' });
+    }
+  });
+
+  app.post('/api/bridge/admin/wallet/packages/delete', (req, res) => {
+    const pkgId = req.body.id || req.body.packageId;
+    if (!pkgId) {
+      return res.status(400).json({ success: false, message: 'شناسه بسته الزامی است.' });
+    }
+    const ok = bridgeStore.deleteWalletPackage(String(pkgId));
+    res.json({
+      success: ok,
+      packages: bridgeStore.getWalletPackages(),
+      message: ok ? 'بسته کیف پول با موفقیت حذف شد.' : 'بسته مورد نظر یافت نشد.',
+    });
+  });
+
+  app.delete('/api/bridge/admin/wallet/packages/:packageId', (req, res) => {
+    const ok = bridgeStore.deleteWalletPackage(req.params.packageId);
+    res.json({
+      success: ok,
+      packages: bridgeStore.getWalletPackages(),
+      message: ok ? 'بسته کیف پول با موفقیت حذف شد.' : 'بسته مورد نظر یافت نشد.',
     });
   });
 
@@ -1577,7 +1661,7 @@ async function startServer() {
     });
   });
 
-  // 19. Admin: List and Create Gift Codes
+  // 19. Admin: List, Create, and Delete Gift Codes
   app.get('/api/bridge/admin/gift-codes', (_req, res) => {
     res.json({
       success: true,
@@ -1591,14 +1675,36 @@ async function startServer() {
       return res.status(400).json({ success: false, message: 'کد و تعداد توکن الزامی است.' });
     }
     const gift = bridgeStore.createGiftCode(code, Number(tokens), Number(maxUses) || 100);
-    res.json({ success: true, giftCode: gift });
+    res.json({ success: true, giftCode: gift, giftCodes: bridgeStore.getGiftCodes() });
+  });
+
+  app.post('/api/bridge/admin/gift-codes/delete', (req, res) => {
+    const idOrCode = req.body.id || req.body.code;
+    if (!idOrCode) {
+      return res.status(400).json({ success: false, message: 'شناسه یا کد هدیه الزامی است.' });
+    }
+    const ok = bridgeStore.deleteGiftCode(String(idOrCode));
+    res.json({
+      success: ok,
+      giftCodes: bridgeStore.getGiftCodes(),
+      message: ok ? 'کد هدیه با موفقیت حذف شد.' : 'کد هدیه یافت نشد.',
+    });
+  });
+
+  app.delete('/api/bridge/admin/gift-codes/:id', (req, res) => {
+    const ok = bridgeStore.deleteGiftCode(req.params.id);
+    res.json({
+      success: ok,
+      giftCodes: bridgeStore.getGiftCodes(),
+      message: ok ? 'کد هدیه با موفقیت حذف شد.' : 'کد هدیه یافت نشد.',
+    });
   });
 
   // 20. Zibal IPG: Get Available Packages for Real Money Payment
   app.get('/api/bridge/payment/packages', (_req, res) => {
     res.json({
       success: true,
-      packages: WALLET_PACKAGES,
+      packages: bridgeStore.getWalletPackages(),
       gateway: {
         name: 'Zibal IPG (درگاه پرداخت آنلاین زیبال)',
         enabled: bridgeStore.getSettings().zibalEnabled ?? true,
@@ -1623,7 +1729,7 @@ async function startServer() {
       let amountTomans = 10000;
 
       if (packageId) {
-        const pack = WALLET_PACKAGES.find((p) => p.id === packageId);
+        const pack = bridgeStore.getWalletPackageById(packageId);
         if (pack) {
           tokens = pack.tokens + (pack.bonusTokens || 0);
           amountTomans = pack.priceTomans;

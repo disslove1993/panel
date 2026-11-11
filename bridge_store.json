@@ -1,13 +1,25 @@
 {
   "settings": {
     "apiKey": "bridge_secret_key_2026",
+    "adminPassword": "admin",
     "defaultInboundId": 4,
     "welcomeTokens": 1000,
+    "freeTrialTrafficGB": 1,
+    "freeTrialDays": 3,
     "sanaeiPanelUrl": "https://panel.wpbaharak.ir:2053",
     "sanaeiWebBasePath": "/",
     "sanaeiUsername": "disslove22",
     "sanaeiPassword": "199300",
     "allowInsecure": true,
+    "zibalMerchant": "68b314a9a45c720017ff86cb",
+    "zibalEnabled": true,
+    "zibalCallbackUrl": "",
+    "cardToCardEnabled": true,
+    "bankCardNumber": "6037997512345678",
+    "bankCardOwner": "مهدی حاجی محمدی",
+    "bankName": "بانک ملی ایران",
+    "telegramBotToken": "",
+    "telegramAdminChatId": "",
     "plans": [
       {
         "id": "plan_1m_10gb",
@@ -48,6 +60,60 @@
         "priceTomans": 0,
         "isPopular": false,
         "description": "تست سرعت و کیفیت اتصال در اپلیکیشن برای کاربران تازه ثبت‌نام شده"
+      }
+    ],
+    "giftCodes": [
+      {
+        "id": "gift_welcome",
+        "code": "WELCOME2026",
+        "tokens": 1000,
+        "maxUses": 1000,
+        "usedCount": 0,
+        "isExpired": false,
+        "createdAt": 1794417834945
+      },
+      {
+        "id": "gift_bonus",
+        "code": "FREE1000",
+        "tokens": 1000,
+        "maxUses": 500,
+        "usedCount": 0,
+        "isExpired": false,
+        "createdAt": 1794417834945
+      }
+    ],
+    "walletPackages": [
+      {
+        "id": "pack_100",
+        "tokens": 100,
+        "priceTomans": 10000,
+        "bonusTokens": 0,
+        "title": "بسته پایه ۱۰۰ توکن (۱۰ هزار تومان)",
+        "isPopular": false
+      },
+      {
+        "id": "pack_1000",
+        "tokens": 1000,
+        "priceTomans": 85000,
+        "bonusTokens": 0,
+        "title": "بسته استاندارد ۱۰۰۰ توکن",
+        "isPopular": false
+      },
+      {
+        "id": "pack_2500",
+        "tokens": 2500,
+        "priceTomans": 195000,
+        "bonusTokens": 200,
+        "title": "بسته نقره‌ای ۲۵۰۰ توکن (+۲۰۰ هدیه)",
+        "isPopular": true
+      },
+      {
+        "id": "pack_5000",
+        "tokens": 5000,
+        "priceTomans": 380000,
+        "bonusTokens": 500,
+        "title": "بسته طلایی ۵۰۰۰ توکن (+۵۰۰ هدیه)",
+        "isPopular": false
       }
     ]
   },
@@ -110,5 +176,9 @@
         "subscribedAt": 1794344579538
       }
     }
-  }
+  },
+  "transactions": [],
+  "redeemedCodes": {},
+  "orders": {},
+  "cardOrders": {}
 }

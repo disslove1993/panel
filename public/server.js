@@ -223,7 +223,7 @@ var BridgeStoreManager = class {
   }
   // --- Wallet Packages CRUD ---
   getWalletPackages() {
-    if (!this.data.settings.walletPackages || this.data.settings.walletPackages.length === 0) {
+    if (!Array.isArray(this.data.settings.walletPackages)) {
       this.data.settings.walletPackages = [...WALLET_PACKAGES];
     }
     return this.data.settings.walletPackages;
@@ -1844,11 +1844,12 @@ async function startServer() {
   });
   app.post("/api/bridge/admin/plans/add", (req, res) => {
     try {
-      const { name, periodDays, trafficGB, priceTokens, priceTomans, inboundId, isPopular, description } = req.body;
+      const body = req.body.planData || req.body;
+      const { id: customId, name, periodDays, trafficGB, priceTokens, priceTomans, inboundId, isPopular, description } = body;
       if (!name || Number(periodDays) <= 0 || Number(trafficGB) <= 0) {
         return res.status(400).json({ success: false, message: "\u0646\u0627\u0645 \u067E\u0644\u0646\u060C \u0645\u062F\u062A \u0627\u0639\u062A\u0628\u0627\u0631 \u0648 \u062D\u062C\u0645 \u06AF\u06CC\u06AF\u0627\u0628\u0627\u06CC\u062A \u0627\u0644\u0632\u0627\u0645\u06CC \u0647\u0633\u062A\u0646\u062F." });
       }
-      const id = `plan_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      const id = customId ? String(customId).trim() : `plan_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       const newPlan = {
         id,
         name: String(name).trim(),
@@ -1861,18 +1862,20 @@ async function startServer() {
         description: description ? String(description).trim() : ""
       };
       bridgeStore.addPlan(newPlan);
-      res.json({ success: true, plan: newPlan, message: "\u067E\u0644\u0646 \u062C\u062F\u06CC\u062F \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u0627\u06CC\u062C\u0627\u062F \u06AF\u0631\u062F\u06CC\u062F." });
+      res.json({ success: true, plan: newPlan, plans: bridgeStore.getPlans(), message: "\u067E\u0644\u0646 \u062C\u062F\u06CC\u062F \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u0627\u06CC\u062C\u0627\u062F \u06AF\u0631\u062F\u06CC\u062F." });
     } catch (err) {
       res.status(500).json({ success: false, message: err?.message || "\u062E\u0637\u0627 \u062F\u0631 \u062B\u0628\u062A \u067E\u0644\u0646" });
     }
   });
   app.post("/api/bridge/admin/plans/update", (req, res) => {
     try {
-      const { id, name, periodDays, trafficGB, priceTokens, priceTomans, inboundId, isPopular, description } = req.body;
-      if (!id) {
+      const targetId = req.body.planId || req.body.id || req.body.planData?.id;
+      const body = req.body.planData || req.body;
+      const { name, periodDays, trafficGB, priceTokens, priceTomans, inboundId, isPopular, description } = body;
+      if (!targetId) {
         return res.status(400).json({ success: false, message: "\u0634\u0646\u0627\u0633\u0647 \u067E\u0644\u0646 \u0627\u0644\u0632\u0627\u0645\u06CC \u0627\u0633\u062A." });
       }
-      const updated = bridgeStore.updatePlan(id, {
+      const updated = bridgeStore.updatePlan(String(targetId), {
         ...name !== void 0 ? { name: String(name).trim() } : {},
         ...periodDays !== void 0 ? { periodDays: Number(periodDays) } : {},
         ...trafficGB !== void 0 ? { trafficGB: Number(trafficGB) } : {},
@@ -1885,7 +1888,7 @@ async function startServer() {
       if (!updated) {
         return res.status(404).json({ success: false, message: "\u067E\u0644\u0646 \u06CC\u0627\u0641\u062A \u0646\u0634\u062F." });
       }
-      res.json({ success: true, plan: updated, message: "\u067E\u0644\u0646 \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u0648\u06CC\u0631\u0627\u06CC\u0634 \u0634\u062F." });
+      res.json({ success: true, plan: updated, plans: bridgeStore.getPlans(), message: "\u067E\u0644\u0646 \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u0648\u06CC\u0631\u0627\u06CC\u0634 \u0634\u062F." });
     } catch (err) {
       res.status(500).json({ success: false, message: err?.message || "\u062E\u0637\u0627 \u062F\u0631 \u0648\u06CC\u0631\u0627\u06CC\u0634 \u067E\u0644\u0646" });
     }
@@ -1896,7 +1899,7 @@ async function startServer() {
       return res.status(400).json({ success: false, message: "\u0634\u0646\u0627\u0633\u0647 \u067E\u0644\u0646 \u0627\u0644\u0632\u0627\u0645\u06CC \u0627\u0633\u062A." });
     }
     const ok = bridgeStore.deletePlan(planId);
-    res.json({ success: ok, message: ok ? "\u067E\u0644\u0646 \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u062D\u0630\u0641 \u0634\u062F." : "\u067E\u0644\u0646 \u06CC\u0627\u0641\u062A \u0646\u0634\u062F." });
+    res.json({ success: ok, plans: bridgeStore.getPlans(), message: ok ? "\u067E\u0644\u0646 \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u062D\u0630\u0641 \u0634\u062F." : "\u067E\u0644\u0646 \u06CC\u0627\u0641\u062A \u0646\u0634\u062F." });
   });
   app.post("/api/bridge/admin/user/delete", (req, res) => {
     const { userId } = req.body;
@@ -2005,7 +2008,12 @@ async function startServer() {
         success: true,
         users,
         plans,
-        settings,
+        walletPackages: bridgeStore.getWalletPackages(),
+        settings: {
+          ...settings,
+          walletPackages: bridgeStore.getWalletPackages(),
+          giftCodes: bridgeStore.getGiftCodes()
+        },
         servers: formatServersList(inbounds),
         stats: {
           totalUsers: users.length,
@@ -2045,7 +2053,7 @@ async function startServer() {
       status: "ok",
       online: true,
       server: "Sanaei Mobile App Bridge",
-      version: "2.5.0",
+      version: "3.0.0",
       timestamp: Date.now(),
       sanaeiConnected: true,
       welcomeTokens: bridgeStore.getSettings().welcomeTokens
@@ -2082,7 +2090,78 @@ async function startServer() {
   app.get("/api/bridge/wallet/packages", (_req, res) => {
     res.json({
       success: true,
-      packages: WALLET_PACKAGES
+      packages: bridgeStore.getWalletPackages()
+    });
+  });
+  app.post("/api/bridge/admin/wallet/packages/add", (req, res) => {
+    try {
+      const body = req.body.packageData || req.body;
+      const pkgTitle = body.title || body.name;
+      const { id, tokens, priceTomans, bonusTokens, isPopular } = body;
+      if (!pkgTitle || Number(tokens) <= 0 || Number(priceTomans) <= 0) {
+        return res.status(400).json({ success: false, message: "\u0639\u0646\u0648\u0627\u0646 \u0628\u0633\u062A\u0647\u060C \u062A\u0639\u062F\u0627\u062F \u062A\u0648\u06A9\u0646 \u0648 \u0642\u06CC\u0645\u062A \u062A\u0648\u0645\u0627\u0646\u06CC \u0627\u0644\u0632\u0627\u0645\u06CC \u0627\u0633\u062A." });
+      }
+      const newPkg = {
+        id: id ? String(id).trim() : `pack_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        title: String(pkgTitle).trim(),
+        tokens: Number(tokens),
+        priceTomans: Number(priceTomans),
+        bonusTokens: Math.max(0, Number(bonusTokens) || 0),
+        isPopular: Boolean(isPopular)
+      };
+      bridgeStore.addWalletPackage(newPkg);
+      const packages = bridgeStore.getWalletPackages();
+      res.json({ success: true, package: newPkg, packages, message: "\u0628\u0633\u062A\u0647 \u06A9\u06CC\u0641 \u067E\u0648\u0644 \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u0627\u0636\u0627\u0641\u0647 \u0634\u062F." });
+    } catch (err) {
+      res.status(500).json({ success: false, message: err?.message || "\u062E\u0637\u0627 \u062F\u0631 \u0627\u0641\u0632\u0648\u062F\u0646 \u0628\u0633\u062A\u0647 \u06A9\u06CC\u0641 \u067E\u0648\u0644" });
+    }
+  });
+  app.post("/api/bridge/admin/wallet/packages/update", (req, res) => {
+    try {
+      const pkgId = req.body.packageId || req.body.id || req.body.packageData?.id;
+      const data = req.body.packageData || req.body;
+      const pkgTitle = data.title !== void 0 ? data.title : data.name;
+      if (!pkgId) {
+        return res.status(400).json({ success: false, message: "\u0634\u0646\u0627\u0633\u0647 \u0628\u0633\u062A\u0647 \u0627\u0644\u0632\u0627\u0645\u06CC \u0627\u0633\u062A." });
+      }
+      const updated = bridgeStore.updateWalletPackage(String(pkgId), {
+        ...pkgTitle !== void 0 ? { title: String(pkgTitle).trim() } : {},
+        ...data.tokens !== void 0 ? { tokens: Number(data.tokens) } : {},
+        ...data.priceTomans !== void 0 ? { priceTomans: Number(data.priceTomans) } : {},
+        ...data.bonusTokens !== void 0 ? { bonusTokens: Math.max(0, Number(data.bonusTokens) || 0) } : {},
+        ...data.isPopular !== void 0 ? { isPopular: Boolean(data.isPopular) } : {}
+      });
+      if (!updated) {
+        return res.status(404).json({ success: false, message: "\u0628\u0633\u062A\u0647 \u0645\u0648\u0631\u062F \u0646\u0638\u0631 \u06CC\u0627\u0641\u062A \u0646\u0634\u062F." });
+      }
+      res.json({
+        success: true,
+        package: updated,
+        packages: bridgeStore.getWalletPackages(),
+        message: "\u0628\u0633\u062A\u0647 \u06A9\u06CC\u0641 \u067E\u0648\u0644 \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u0648\u06CC\u0631\u0627\u06CC\u0634 \u0634\u062F."
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, message: err?.message || "\u062E\u0637\u0627 \u062F\u0631 \u0648\u06CC\u0631\u0627\u06CC\u0634 \u0628\u0633\u062A\u0647 \u06A9\u06CC\u0641 \u067E\u0648\u0644" });
+    }
+  });
+  app.post("/api/bridge/admin/wallet/packages/delete", (req, res) => {
+    const pkgId = req.body.id || req.body.packageId;
+    if (!pkgId) {
+      return res.status(400).json({ success: false, message: "\u0634\u0646\u0627\u0633\u0647 \u0628\u0633\u062A\u0647 \u0627\u0644\u0632\u0627\u0645\u06CC \u0627\u0633\u062A." });
+    }
+    const ok = bridgeStore.deleteWalletPackage(String(pkgId));
+    res.json({
+      success: ok,
+      packages: bridgeStore.getWalletPackages(),
+      message: ok ? "\u0628\u0633\u062A\u0647 \u06A9\u06CC\u0641 \u067E\u0648\u0644 \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u062D\u0630\u0641 \u0634\u062F." : "\u0628\u0633\u062A\u0647 \u0645\u0648\u0631\u062F \u0646\u0638\u0631 \u06CC\u0627\u0641\u062A \u0646\u0634\u062F."
+    });
+  });
+  app.delete("/api/bridge/admin/wallet/packages/:packageId", (req, res) => {
+    const ok = bridgeStore.deleteWalletPackage(req.params.packageId);
+    res.json({
+      success: ok,
+      packages: bridgeStore.getWalletPackages(),
+      message: ok ? "\u0628\u0633\u062A\u0647 \u06A9\u06CC\u0641 \u067E\u0648\u0644 \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u062D\u0630\u0641 \u0634\u062F." : "\u0628\u0633\u062A\u0647 \u0645\u0648\u0631\u062F \u0646\u0638\u0631 \u06CC\u0627\u0641\u062A \u0646\u0634\u062F."
     });
   });
   app.post("/api/bridge/wallet/redeem", (req, res) => {
@@ -2129,12 +2208,32 @@ async function startServer() {
       return res.status(400).json({ success: false, message: "\u06A9\u062F \u0648 \u062A\u0639\u062F\u0627\u062F \u062A\u0648\u06A9\u0646 \u0627\u0644\u0632\u0627\u0645\u06CC \u0627\u0633\u062A." });
     }
     const gift = bridgeStore.createGiftCode(code, Number(tokens), Number(maxUses) || 100);
-    res.json({ success: true, giftCode: gift });
+    res.json({ success: true, giftCode: gift, giftCodes: bridgeStore.getGiftCodes() });
+  });
+  app.post("/api/bridge/admin/gift-codes/delete", (req, res) => {
+    const idOrCode = req.body.id || req.body.code;
+    if (!idOrCode) {
+      return res.status(400).json({ success: false, message: "\u0634\u0646\u0627\u0633\u0647 \u06CC\u0627 \u06A9\u062F \u0647\u062F\u06CC\u0647 \u0627\u0644\u0632\u0627\u0645\u06CC \u0627\u0633\u062A." });
+    }
+    const ok = bridgeStore.deleteGiftCode(String(idOrCode));
+    res.json({
+      success: ok,
+      giftCodes: bridgeStore.getGiftCodes(),
+      message: ok ? "\u06A9\u062F \u0647\u062F\u06CC\u0647 \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u062D\u0630\u0641 \u0634\u062F." : "\u06A9\u062F \u0647\u062F\u06CC\u0647 \u06CC\u0627\u0641\u062A \u0646\u0634\u062F."
+    });
+  });
+  app.delete("/api/bridge/admin/gift-codes/:id", (req, res) => {
+    const ok = bridgeStore.deleteGiftCode(req.params.id);
+    res.json({
+      success: ok,
+      giftCodes: bridgeStore.getGiftCodes(),
+      message: ok ? "\u06A9\u062F \u0647\u062F\u06CC\u0647 \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u062D\u0630\u0641 \u0634\u062F." : "\u06A9\u062F \u0647\u062F\u06CC\u0647 \u06CC\u0627\u0641\u062A \u0646\u0634\u062F."
+    });
   });
   app.get("/api/bridge/payment/packages", (_req, res) => {
     res.json({
       success: true,
-      packages: WALLET_PACKAGES,
+      packages: bridgeStore.getWalletPackages(),
       gateway: {
         name: "Zibal IPG (\u062F\u0631\u06AF\u0627\u0647 \u067E\u0631\u062F\u0627\u062E\u062A \u0622\u0646\u0644\u0627\u06CC\u0646 \u0632\u06CC\u0628\u0627\u0644)",
         enabled: bridgeStore.getSettings().zibalEnabled ?? true,
@@ -2154,7 +2253,7 @@ async function startServer() {
       let tokens = 100;
       let amountTomans = 1e4;
       if (packageId) {
-        const pack = WALLET_PACKAGES.find((p) => p.id === packageId);
+        const pack = bridgeStore.getWalletPackageById(packageId);
         if (pack) {
           tokens = pack.tokens + (pack.bonusTokens || 0);
           amountTomans = pack.priceTomans;

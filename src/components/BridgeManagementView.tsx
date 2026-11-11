@@ -185,6 +185,10 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
         if (data.settings?.telegramAdminChatId) {
           setTelegramAdminChatId(data.settings.telegramAdminChatId);
         }
+        const serverPkgs = data.walletPackages || data.settings?.walletPackages;
+        if (Array.isArray(serverPkgs) && serverPkgs.length > 0) {
+          setWalletPackages(serverPkgs);
+        }
       }
     } catch (err) {
       console.error('Error fetching bridge overview:', err);
@@ -196,7 +200,7 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
   const fetchGiftCodes = async () => {
     try {
       const res = await fetch('/api/bridge/admin/gift-codes');
-      const data = await res.json();
+      const data = await safeParseJson(res);
       if (data && data.success) {
         setGiftCodes(data.giftCodes || []);
       }
@@ -208,7 +212,7 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
   const fetchCardOrders = async () => {
     try {
       const res = await fetch('/api/bridge/admin/card-orders');
-      const data = await res.json();
+      const data = await safeParseJson(res);
       if (data && data.success) {
         setCardOrders(data.orders || []);
       }
@@ -229,8 +233,8 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
           maxUses: Number(newGiftMaxUses) || 500,
         }),
       });
-      const data = await res.json();
-      if (data.success) {
+      const data = await safeParseJson(res);
+      if (data && data.success) {
         setGiftStatusMsg(`کد هدیه «${newGiftCode.toUpperCase()}» با موفقیت ذخیره شد.`);
         setNewGiftCode('');
         fetchGiftCodes();
@@ -269,7 +273,7 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ giftCodes: updatedList }),
-        });
+        }).catch(() => {});
         setGiftStatusMsg(`کد هدیه «${code}» با موفقیت حذف شد.`);
       }
     } catch {
@@ -328,6 +332,11 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
       ? currentList.map((p) => (p.id === editingWalletPkg.id ? newPkgObj : p))
       : [...currentList, newPkgObj];
 
+    setWalletPackages(updatedList);
+    try {
+      localStorage.setItem('cheshmak_wallet_packages', JSON.stringify(updatedList));
+    } catch {}
+
     try {
       const endpoint = editingWalletPkg
         ? '/api/bridge/admin/wallet/packages/update'
@@ -341,13 +350,12 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
         body: JSON.stringify(payload),
       });
       const data = await safeParseJson(res);
-      if (data && data.success) {
-        setWalletPackages(data.packages || updatedList);
-      } else {
-        setWalletPackages(updatedList);
+      if (data && data.success && Array.isArray(data.packages)) {
+        setWalletPackages(data.packages);
         try {
-          localStorage.setItem('cheshmak_wallet_packages', JSON.stringify(updatedList));
+          localStorage.setItem('cheshmak_wallet_packages', JSON.stringify(data.packages));
         } catch {}
+      } else {
         await fetch('/api/bridge/admin/settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -358,7 +366,6 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
       setPaymentMsg('بسته کیف پول با موفقیت ذخیره شد ✅');
       setTimeout(() => setPaymentMsg(null), 3500);
     } catch {
-      setWalletPackages(updatedList);
       setIsWalletPkgModalOpen(false);
       setPaymentMsg('بسته کیف پول با موفقیت ذخیره شد ✅');
       setTimeout(() => setPaymentMsg(null), 3500);
@@ -375,6 +382,9 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
     ];
     const updatedList = currentList.filter((p) => p.id !== pkgId);
     setWalletPackages(updatedList);
+    try {
+      localStorage.setItem('cheshmak_wallet_packages', JSON.stringify(updatedList));
+    } catch {}
 
     try {
       const res = await fetch('/api/bridge/admin/wallet/packages/delete', {
@@ -383,12 +393,12 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
         body: JSON.stringify({ packageId: pkgId }),
       });
       const data = await safeParseJson(res);
-      if (data && data.success) {
-        setWalletPackages(data.packages || updatedList);
-      } else {
+      if (data && data.success && Array.isArray(data.packages)) {
+        setWalletPackages(data.packages);
         try {
-          localStorage.setItem('cheshmak_wallet_packages', JSON.stringify(updatedList));
+          localStorage.setItem('cheshmak_wallet_packages', JSON.stringify(data.packages));
         } catch {}
+      } else {
         await fetch('/api/bridge/admin/settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -412,7 +422,7 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
         if (savedLocal && data.packages.length === 4 && data.packages[0]?.id === 'pack_100') {
           try {
             const parsedLocal = JSON.parse(savedLocal);
-            if (Array.isArray(parsedLocal) && parsedLocal.length > 0) {
+            if (Array.isArray(parsedLocal)) {
               setWalletPackages(parsedLocal);
               return;
             }
