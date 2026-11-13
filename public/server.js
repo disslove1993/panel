@@ -4,6 +4,7 @@ import http from "http";
 import https from "https";
 import path2 from "path";
 import fs2 from "fs";
+import multer from "multer";
 import { exec, execSync } from "child_process";
 import { fileURLToPath as fileURLToPath2 } from "url";
 
@@ -1316,8 +1317,8 @@ async function fetchOnlineClients(session, allowInsecure = true) {
 }
 async function startServer() {
   const app = express();
-  app.use(express.json({ limit: "25mb" }));
-  app.use(express.urlencoded({ extended: true, limit: "25mb" }));
+  app.use(express.json({ limit: "200mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "200mb" }));
   const receiptsDir = path2.resolve(__dirname, "public/uploads/receipts");
   const apkDir = path2.resolve(__dirname, "public/apk");
   const downloadsDir = path2.resolve(__dirname, "public/downloads");
@@ -3145,29 +3146,61 @@ ${statusText}`;
       staticUrl: "/downloads/Cheshmak-Custom.apk"
     });
   });
-  app.post(
-    "/api/bridge/admin/upload-base-apk",
-    express.raw({ type: ["application/octet-stream", "application/vnd.android.package-archive"], limit: "200mb" }),
-    (req, res) => {
+  const apkUpload = multer({
+    dest: "/tmp/",
+    limits: { fileSize: 200 * 1024 * 1024 }
+  });
+  app.post("/api/bridge/admin/upload-base-apk", (req, res) => {
+    req.setTimeout(3e5);
+    apkUpload.any()(req, res, (uploadErr) => {
+      if (uploadErr) {
+        return res.status(400).json({
+          success: false,
+          message: `\u062E\u0637\u0627 \u062F\u0631 \u0622\u067E\u0644\u0648\u062F \u0641\u0627\u06CC\u0644: ${uploadErr?.message || "\u062D\u062C\u0645 \u06CC\u0627 \u0641\u0631\u0645\u062A \u0641\u0627\u06CC\u0644 \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A."}`
+        });
+      }
+      const files = req.files;
+      const uploadedFile = req.file || (Array.isArray(files) ? files[0] : void 0);
+      if (!uploadedFile || !uploadedFile.path) {
+        return res.status(400).json({
+          success: false,
+          message: "\u0641\u0627\u06CC\u0644\u06CC \u062F\u0631\u06CC\u0627\u0641\u062A \u0646\u0634\u062F. \u0644\u0637\u0641\u0627\u064B \u06CC\u06A9 \u0641\u0627\u06CC\u0644 .apk \u0645\u0639\u062A\u0628\u0631 \u0627\u0646\u062A\u062E\u0627\u0628 \u06A9\u0646\u06CC\u062F."
+        });
+      }
       try {
-        if (!Buffer.isBuffer(req.body) || req.body.length < 100) {
-          return res.status(400).json({ success: false, message: "\u0641\u0627\u06CC\u0644 APK \u0627\u0631\u0633\u0627\u0644\u06CC \u0645\u0639\u062A\u0628\u0631 \u0646\u06CC\u0633\u062A \u06CC\u0627 \u062E\u0627\u0644\u06CC \u0627\u0633\u062A." });
-        }
         if (!fs2.existsSync(apkDir)) {
           fs2.mkdirSync(apkDir, { recursive: true });
         }
-        fs2.writeFileSync(baseApkPath, req.body);
-        res.json({
+        try {
+          fs2.renameSync(uploadedFile.path, baseApkPath);
+        } catch (moveErr) {
+          if (moveErr?.code === "EXDEV") {
+            fs2.copyFileSync(uploadedFile.path, baseApkPath);
+            fs2.unlinkSync(uploadedFile.path);
+          } else {
+            throw moveErr;
+          }
+        }
+        const stat = fs2.statSync(baseApkPath);
+        return res.json({
           success: true,
           message: "\u0641\u0627\u06CC\u0644 \u067E\u0627\u06CC\u0647 base.apk \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u062F\u0631 \u0645\u0633\u06CC\u0631 public/apk/base.apk \u0630\u062E\u06CC\u0631\u0647 \u0634\u062F.",
-          size: req.body.length
+          size: stat.size
         });
       } catch (err) {
-        res.status(500).json({ success: false, message: err?.message || "\u062E\u0637\u0627 \u062F\u0631 \u0630\u062E\u06CC\u0631\u0647 \u0641\u0627\u06CC\u0644 base.apk" });
+        try {
+          if (fs2.existsSync(uploadedFile.path)) fs2.unlinkSync(uploadedFile.path);
+        } catch {
+        }
+        return res.status(500).json({
+          success: false,
+          message: err?.message || "\u062E\u0637\u0627 \u062F\u0631 \u0627\u0646\u062A\u0642\u0627\u0644 \u0648 \u0630\u062E\u06CC\u0631\u0647 \u0641\u0627\u06CC\u0644 base.apk"
+        });
       }
-    }
-  );
+    });
+  });
   app.post("/api/bridge/admin/build-apk", async (req, res) => {
+    req.setTimeout(3e5);
     try {
       if (!fs2.existsSync(baseApkPath)) {
         return res.status(404).json({

@@ -3,6 +3,7 @@ import http from 'http';
 import https from 'https';
 import path from 'path';
 import fs from 'fs';
+import multer from 'multer';
 import { exec, execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { bridgeStore, WALLET_PACKAGES } from './bridgeStore';
@@ -613,8 +614,8 @@ async function fetchOnlineClients(session: AuthSession, allowInsecure = true): P
 
 async function startServer() {
   const app = express();
-  app.use(express.json({ limit: '25mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '25mb' }));
+  app.use(express.json({ limit: '200mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '200mb' }));
 
   // Ensure public uploads receipts, apk, and downloads directories exist
   const receiptsDir = path.resolve(__dirname, 'public/uploads/receipts');
@@ -2710,32 +2711,71 @@ async function startServer() {
     });
   });
 
-  // Optional: Direct binary upload for base.apk from Web Panel
-  app.post(
-    '/api/bridge/admin/upload-base-apk',
-    express.raw({ type: ['application/octet-stream', 'application/vnd.android.package-archive'], limit: '200mb' }),
-    (req, res) => {
+  // Multer middleware for streaming large base.apk uploads to disk
+  const apkUpload = multer({
+    dest: '/tmp/',
+    limits: { fileSize: 200 * 1024 * 1024 },
+  });
+
+  // Upload base.apk via multipart/form-data using Multer
+  app.post('/api/bridge/admin/upload-base-apk', (req, res) => {
+    req.setTimeout(300000);
+    apkUpload.any()(req, res, (uploadErr: any) => {
+      if (uploadErr) {
+        return res.status(400).json({
+          success: false,
+          message: `خطا در آپلود فایل: ${uploadErr?.message || 'حجم یا فرمت فایل نامعتبر است.'}`,
+        });
+      }
+
+      const files = (req as any).files as Express.Multer.File[] | undefined;
+      const uploadedFile = (req as any).file || (Array.isArray(files) ? files[0] : undefined);
+
+      if (!uploadedFile || !uploadedFile.path) {
+        return res.status(400).json({
+          success: false,
+          message: 'فایلی دریافت نشد. لطفاً یک فایل .apk معتبر انتخاب کنید.',
+        });
+      }
+
       try {
-        if (!Buffer.isBuffer(req.body) || req.body.length < 100) {
-          return res.status(400).json({ success: false, message: 'فایل APK ارسالی معتبر نیست یا خالی است.' });
-        }
         if (!fs.existsSync(apkDir)) {
           fs.mkdirSync(apkDir, { recursive: true });
         }
-        fs.writeFileSync(baseApkPath, req.body);
-        res.json({
+
+        // Move uploaded file from /tmp/ to public/apk/base.apk (handles cross-device EXDEV safely)
+        try {
+          fs.renameSync(uploadedFile.path, baseApkPath);
+        } catch (moveErr: any) {
+          if (moveErr?.code === 'EXDEV') {
+            fs.copyFileSync(uploadedFile.path, baseApkPath);
+            fs.unlinkSync(uploadedFile.path);
+          } else {
+            throw moveErr;
+          }
+        }
+
+        const stat = fs.statSync(baseApkPath);
+        return res.json({
           success: true,
           message: 'فایل پایه base.apk با موفقیت در مسیر public/apk/base.apk ذخیره شد.',
-          size: req.body.length,
+          size: stat.size,
         });
       } catch (err: any) {
-        res.status(500).json({ success: false, message: err?.message || 'خطا در ذخیره فایل base.apk' });
+        try {
+          if (fs.existsSync(uploadedFile.path)) fs.unlinkSync(uploadedFile.path);
+        } catch {}
+        return res.status(500).json({
+          success: false,
+          message: err?.message || 'خطا در انتقال و ذخیره فایل base.apk',
+        });
       }
-    }
-  );
+    });
+  });
 
   // Build Customized White-Label APK
   app.post('/api/bridge/admin/build-apk', async (req, res) => {
+    req.setTimeout(300000);
     try {
       if (!fs.existsSync(baseApkPath)) {
         return res.status(404).json({

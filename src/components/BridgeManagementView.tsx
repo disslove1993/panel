@@ -159,7 +159,13 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
     typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
   );
   const [isBuildingApk, setIsBuildingApk] = useState(false);
+  const [buildProgress, setBuildProgress] = useState(0);
   const [isUploadingBaseApk, setIsUploadingBaseApk] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{
+    percent: number;
+    loaded: number;
+    total: number;
+  } | null>(null);
   const [apkBuildError, setApkBuildError] = useState<string | null>(null);
   const [apkBuildSuccess, setApkBuildSuccess] = useState<{
     message: string;
@@ -872,35 +878,82 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
     }
   };
 
-  const handleUploadBaseApk = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUploadBaseApk = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
     setIsUploadingBaseApk(true);
     setApkBuildError(null);
-    try {
-      const res = await fetch('/api/bridge/admin/upload-base-apk', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/octet-stream' },
-        body: file,
-      });
-      const data = await safeParseJson(res);
-      if (data && data.success) {
-        await fetchApkStatus();
-      } else {
-        setApkBuildError(data?.message || 'خطا در آپلود فایل base.apk');
+    setUploadProgress({ percent: 0, loaded: 0, total: file.size });
+
+    const formData = new FormData();
+    formData.append('apk', file);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/bridge/admin/upload-base-apk', true);
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        const percent = Math.min(100, Math.round((event.loaded / event.total) * 100));
+        setUploadProgress({
+          percent,
+          loaded: event.loaded,
+          total: event.total,
+        });
       }
-    } catch (err: any) {
-      setApkBuildError(err?.message || 'خطا در آپلود فایل پایه APK');
-    } finally {
+    };
+
+    xhr.onload = async () => {
       setIsUploadingBaseApk(false);
       e.target.value = '';
-    }
+      try {
+        const data = JSON.parse(xhr.responseText || '{}');
+        if (xhr.status >= 200 && xhr.status < 300 && data.success) {
+          setUploadProgress({ percent: 100, loaded: file.size, total: file.size });
+          await fetchApkStatus();
+          setTimeout(() => setUploadProgress(null), 2000);
+        } else {
+          setUploadProgress(null);
+          setApkBuildError(data?.message || `خطا در آپلود فایل base.apk (کد ${xhr.status})`);
+        }
+      } catch {
+        setUploadProgress(null);
+        setApkBuildError(`پاسخ نامعتبر از سرور هنگام آپلود فایل (کد ${xhr.status})`);
+      }
+    };
+
+    xhr.onerror = () => {
+      setIsUploadingBaseApk(false);
+      setUploadProgress(null);
+      e.target.value = '';
+      setApkBuildError('خطا در اتصال هنگام آپلود فایل base.apk. لطفاً محدودیت حجم آپلود سرور یا اتصال شبکه را بررسی کنید.');
+    };
+
+    xhr.ontimeout = () => {
+      setIsUploadingBaseApk(false);
+      setUploadProgress(null);
+      e.target.value = '';
+      setApkBuildError('زمان آپلود فایل به پایان رسید. لطفاً مجدداً تلاش کنید.');
+    };
+
+    xhr.timeout = 300000;
+    xhr.send(formData);
   };
 
   const handleBuildCustomApk = async () => {
     setIsBuildingApk(true);
+    setBuildProgress(0);
     setApkBuildError(null);
     setApkBuildSuccess(null);
+
+    // Smoothly animate progress from 0% to 90% over ~20 seconds (0.9% every 200ms)
+    const progressTimer = window.setInterval(() => {
+      setBuildProgress((prev) => {
+        if (prev >= 90) return 90;
+        return Number(Math.min(90, prev + 0.9).toFixed(1));
+      });
+    }, 200);
+
     try {
       const res = await fetch('/api/bridge/admin/build-apk', {
         method: 'POST',
@@ -910,7 +963,10 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
         }),
       });
       const data = await safeParseJson(res);
+      window.clearInterval(progressTimer);
+
       if (data && data.success) {
+        setBuildProgress(100);
         setApkBuildSuccess({
           message: data.message,
           downloadUrl: data.downloadUrl || '/api/bridge/download-apk',
@@ -919,11 +975,14 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
         });
         await fetchApkStatus();
       } else {
+        setBuildProgress(0);
         setApkBuildError(
           data?.message || 'فایل پایه base.apk در مسیر public/apk یافت نشد یا ابزارهای بیلد روی سرور نصب نیستند.'
         );
       }
     } catch (err: any) {
+      window.clearInterval(progressTimer);
+      setBuildProgress(0);
       setApkBuildError(err?.message || 'خطا در ارتباط با سرور هنگام ساخت APK');
     } finally {
       setIsBuildingApk(false);
@@ -2201,8 +2260,39 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
               </label>
             </div>
 
+            {/* Real-Time Upload Progress Bar */}
+            {uploadProgress && (
+              <div className="p-4 bg-[#F4F7FE] dark:bg-slate-950 border border-[#CFE0FF] dark:border-blue-900/50 rounded-2xl space-y-2.5">
+                <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2 font-bold text-slate-800 dark:text-slate-100">
+                    <Upload className="w-4 h-4 text-[#0061FF] animate-bounce" />
+                    <span>
+                      {uploadProgress.percent === 100
+                        ? 'آپلود فایل پایه با موفقیت تکمیل شد ✅'
+                        : 'در حال آپلود فایل پایه base.apk روی سرور...'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 font-mono text-xs">
+                    <span className="text-slate-500 dark:text-slate-400" dir="ltr">
+                      {(uploadProgress.loaded / (1024 * 1024)).toFixed(1)} MB /{' '}
+                      {(uploadProgress.total / (1024 * 1024)).toFixed(1)} MB
+                    </span>
+                    <span className="font-black text-[#0061FF] dark:text-blue-400">
+                      {uploadProgress.percent}%
+                    </span>
+                  </div>
+                </div>
+                <div className="w-full h-3 bg-white dark:bg-slate-900 rounded-full overflow-hidden border border-[#DCE6FF] dark:border-slate-800">
+                  <div
+                    className="h-full bg-gradient-to-l from-[#0061FF] to-[#3B82F6] rounded-full transition-all duration-150 ease-out"
+                    style={{ width: `${uploadProgress.percent}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
             {/* Warning if base.apk is missing */}
-            {apkStatus && !apkStatus.hasBaseApk && (
+            {apkStatus && !apkStatus.hasBaseApk && !uploadProgress && (
               <div className="p-4 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 rounded-xl flex items-start gap-3 text-xs text-amber-800 dark:text-amber-200">
                 <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
                 <div className="space-y-1 leading-relaxed">
@@ -2240,7 +2330,7 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                   {isBuildingApk ? (
                     <>
                       <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>در حال ساخت و امضای APK... (۱۵ تا ۳۰ ثانیه)</span>
+                      <span>در حال ساخت APK... ({Math.round(buildProgress)}%)</span>
                     </>
                   ) : (
                     <>
@@ -2251,6 +2341,45 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                 </button>
               </div>
             </div>
+
+            {/* Animated APK Generation Progress Bar */}
+            {(isBuildingApk || (buildProgress === 100 && apkBuildSuccess)) && (
+              <div className="p-4 bg-[#F4F7FE] dark:bg-slate-950 border border-[#CFE0FF] dark:border-blue-900/50 rounded-2xl space-y-2.5">
+                <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2 font-bold text-slate-800 dark:text-slate-100">
+                    {buildProgress >= 100 ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                    ) : (
+                      <RefreshCw className="w-4 h-4 text-[#0061FF] animate-spin" />
+                    )}
+                    <span>
+                      {buildProgress >= 100
+                        ? 'فایل APK اختصاصی با موفقیت بیلد و امضا شد! ✅'
+                        : buildProgress < 25
+                        ? 'مرحله ۱/۴: دیکد کردن ساختار base.apk با apktool...'
+                        : buildProgress < 45
+                        ? 'مرحله ۲/۴: تزریق آدرس سرور در assets/config.json...'
+                        : buildProgress < 75
+                        ? 'مرحله ۳/۴: کامپایل مجدد و بهینه‌سازی با zipalign...'
+                        : 'مرحله ۴/۴: امضای دیجیتال نهایی با apksigner...'}
+                    </span>
+                  </div>
+                  <span className="font-mono font-black text-[#0061FF] dark:text-blue-400">
+                    {Math.round(buildProgress)}%
+                  </span>
+                </div>
+                <div className="w-full h-3 bg-white dark:bg-slate-900 rounded-full overflow-hidden border border-[#DCE6FF] dark:border-slate-800">
+                  <div
+                    className={`h-full rounded-full transition-all duration-200 ease-linear ${
+                      buildProgress >= 100
+                        ? 'bg-gradient-to-l from-emerald-500 to-teal-400'
+                        : 'bg-gradient-to-l from-[#0061FF] via-[#2B7FFF] to-[#60A5FA]'
+                    }`}
+                    style={{ width: `${buildProgress}%` }}
+                  />
+                </div>
+              </div>
+            )}
 
             {/* Error Display */}
             {apkBuildError && (
