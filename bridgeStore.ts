@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import {
   BridgePlan,
   BridgeSettings,
@@ -11,8 +12,17 @@ import {
   BridgeWalletPackage,
 } from './src/types/bridge';
 
+const __storeDir = (() => {
+  try {
+    return path.dirname(fileURLToPath(import.meta.url));
+  } catch {
+    return process.cwd();
+  }
+})();
 
-const STORE_PATH = path.resolve(process.cwd(), 'bridge_store.json');
+const STORE_PATH = fs.existsSync(path.resolve(process.cwd(), 'bridge_store.json'))
+  ? path.resolve(process.cwd(), 'bridge_store.json')
+  : path.resolve(__storeDir, 'bridge_store.json');
 
 const DEFAULT_PLANS: BridgePlan[] = [
   {

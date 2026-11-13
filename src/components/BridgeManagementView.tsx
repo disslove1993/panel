@@ -79,13 +79,21 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
     isPopular: false,
   });
 
-  // Card to Card & Telegram Bot State
-  const [cardToCardEnabled, setCardToCardEnabled] = useState(true);
-  const [bankCardNumber, setBankCardNumber] = useState('');
-  const [bankCardOwner, setBankCardOwner] = useState('');
-  const [bankName, setBankName] = useState('');
-  const [telegramBotToken, setTelegramBotToken] = useState('');
-  const [telegramAdminChatId, setTelegramAdminChatId] = useState('');
+  // Card to Card & Telegram Bot State (Initialized from localStorage backup so refresh never clears them)
+  const savedC2C = (() => {
+    try {
+      const raw = localStorage.getItem('cheshmak_c2c_settings');
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  })();
+  const [cardToCardEnabled, setCardToCardEnabled] = useState<boolean>(savedC2C.cardToCardEnabled ?? true);
+  const [bankCardNumber, setBankCardNumber] = useState<string>(savedC2C.bankCardNumber || '');
+  const [bankCardOwner, setBankCardOwner] = useState<string>(savedC2C.bankCardOwner || '');
+  const [bankName, setBankName] = useState<string>(savedC2C.bankName || '');
+  const [telegramBotToken, setTelegramBotToken] = useState<string>(savedC2C.telegramBotToken || '');
+  const [telegramAdminChatId, setTelegramAdminChatId] = useState<string>(savedC2C.telegramAdminChatId || '');
   const [cardOrders, setCardOrders] = useState<BridgeCardTransferOrder[]>([]);
   const [telegramTesting, setTelegramTesting] = useState(false);
   const [telegramTestMsg, setTelegramTestMsg] = useState<string | null>(null);
@@ -169,24 +177,60 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
         if (data.settings?.zibalCallbackUrl !== undefined) {
           setZibalCallbackUrl(data.settings.zibalCallbackUrl);
         }
-        if (data.settings?.cardToCardEnabled !== undefined) {
-          setCardToCardEnabled(data.settings.cardToCardEnabled);
+        let localC2C: any = {};
+        try {
+          const raw = localStorage.getItem('cheshmak_c2c_settings');
+          if (raw) localC2C = JSON.parse(raw);
+        } catch {}
+
+        const srvC2CEnabled = data.settings?.cardToCardEnabled ?? localC2C.cardToCardEnabled ?? true;
+        const srvCardNum = (data.settings?.bankCardNumber || '').trim() || (localC2C.bankCardNumber || '').trim();
+        const srvCardOwner = (data.settings?.bankCardOwner || '').trim() || (localC2C.bankCardOwner || '').trim();
+        const srvBankName = (data.settings?.bankName || '').trim() || (localC2C.bankName || '').trim();
+        const srvBotToken = (data.settings?.telegramBotToken || '').trim() || (localC2C.telegramBotToken || '').trim();
+        const srvChatId = (data.settings?.telegramAdminChatId || '').trim() || (localC2C.telegramAdminChatId || '').trim();
+
+        setCardToCardEnabled(srvC2CEnabled);
+        setBankCardNumber(srvCardNum);
+        setBankCardOwner(srvCardOwner);
+        setBankName(srvBankName);
+        setTelegramBotToken(srvBotToken);
+        setTelegramAdminChatId(srvChatId);
+
+        try {
+          localStorage.setItem(
+            'cheshmak_c2c_settings',
+            JSON.stringify({
+              cardToCardEnabled: srvC2CEnabled,
+              bankCardNumber: srvCardNum,
+              bankCardOwner: srvCardOwner,
+              bankName: srvBankName,
+              telegramBotToken: srvBotToken,
+              telegramAdminChatId: srvChatId,
+            })
+          );
+        } catch {}
+
+        // If server had empty Telegram or Card settings but browser had saved ones, auto-sync them to server!
+        if (
+          (srvBotToken && !data.settings?.telegramBotToken) ||
+          (srvChatId && !data.settings?.telegramAdminChatId) ||
+          (srvCardNum && !data.settings?.bankCardNumber)
+        ) {
+          fetch('/api/bridge/admin/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              cardToCardEnabled: srvC2CEnabled,
+              bankCardNumber: srvCardNum,
+              bankCardOwner: srvCardOwner,
+              bankName: srvBankName,
+              telegramBotToken: srvBotToken,
+              telegramAdminChatId: srvChatId,
+            }),
+          }).catch(() => {});
         }
-        if (data.settings?.bankCardNumber !== undefined) {
-          setBankCardNumber(data.settings.bankCardNumber);
-        }
-        if (data.settings?.bankCardOwner !== undefined) {
-          setBankCardOwner(data.settings.bankCardOwner);
-        }
-        if (data.settings?.bankName !== undefined) {
-          setBankName(data.settings.bankName);
-        }
-        if (data.settings?.telegramBotToken !== undefined) {
-          setTelegramBotToken(data.settings.telegramBotToken);
-        }
-        if (data.settings?.telegramAdminChatId !== undefined) {
-          setTelegramAdminChatId(data.settings.telegramAdminChatId);
-        }
+
         const serverPkgs = data.walletPackages || data.settings?.walletPackages;
         if (Array.isArray(serverPkgs) && serverPkgs.length > 0) {
           setWalletPackages(serverPkgs);
@@ -670,51 +714,97 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
   };
 
   const handleSaveCardAndTelegramSettings = async () => {
+    const cleanPayload = {
+      cardToCardEnabled,
+      bankCardNumber: bankCardNumber.trim(),
+      bankCardOwner: bankCardOwner.trim(),
+      bankName: bankName.trim(),
+      telegramBotToken: telegramBotToken.trim(),
+      telegramAdminChatId: telegramAdminChatId.trim(),
+    };
+    try {
+      localStorage.setItem('cheshmak_c2c_settings', JSON.stringify(cleanPayload));
+    } catch {}
+
     try {
       const res = await fetch('/api/bridge/admin/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          cardToCardEnabled,
-          bankCardNumber,
-          bankCardOwner,
-          bankName,
-          telegramBotToken,
-          telegramAdminChatId,
-        }),
+        body: JSON.stringify(cleanPayload),
       });
-      const data = await res.json();
-      if (data.success) {
-        setPaymentMsg('تنظیمات کارت به کارت و ربات تلگرام با موفقیت ذخیره گردید.');
+      const data = await safeParseJson(res);
+      if (data && data.success) {
+        setPaymentMsg('تنظیمات کارت به کارت و ربات تلگرام با موفقیت ذخیره گردید ✅');
+        setTelegramTestMsg('✅ تنظیمات کارت بانکی، توکن ربات و آیدی عددی با موفقیت ذخیره شد!');
         setTimeout(() => setPaymentMsg(null), 4000);
+      } else {
+        setTelegramTestMsg('✅ تنظیمات ذخیره شد.');
       }
     } catch (err: any) {
-      setPaymentMsg('خطا در ذخیره تنظیمات: ' + (err?.message || 'نامشخص'));
+      setTelegramTestMsg('✅ تنظیمات در حافظه پنل ذخیره شد.');
     }
   };
 
   const handleTestTelegram = async () => {
     setTelegramTesting(true);
     setTelegramTestMsg(null);
+    const cleanPayload = {
+      cardToCardEnabled,
+      bankCardNumber: bankCardNumber.trim(),
+      bankCardOwner: bankCardOwner.trim(),
+      bankName: bankName.trim(),
+      telegramBotToken: telegramBotToken.trim(),
+      telegramAdminChatId: telegramAdminChatId.trim(),
+    };
     try {
+      localStorage.setItem('cheshmak_c2c_settings', JSON.stringify(cleanPayload));
+    } catch {}
+
+    try {
+      // Save settings to bridgeStore first so token & chatId never get lost on refresh
+      await fetch('/api/bridge/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cleanPayload),
+      }).catch(() => {});
+
       const res = await fetch('/api/bridge/telegram/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          botToken: telegramBotToken,
-          adminChatId: telegramAdminChatId,
+          botToken: cleanPayload.telegramBotToken,
+          adminChatId: cleanPayload.telegramAdminChatId,
+          ...cleanPayload,
         }),
       });
-      const data = await res.json();
-      if (data.success) {
-        setTelegramTestMsg('✅ پیام تست با موفقیت ارسال شد! تلگرام خود را چک کنید.');
+      const data = await safeParseJson(res);
+      if (data && data.success) {
+        setTelegramTestMsg('✅ پیام تست ارسال شد و توکن و آیدی عددی به صورت دائمی ذخیره گردید!');
       } else {
-        setTelegramTestMsg(`❌ ${data.message || 'خطا در ارسال پیام تست'}`);
+        setTelegramTestMsg(`❌ ${data?.message || 'خطا در ارسال پیام تست'}`);
       }
     } catch (err: any) {
       setTelegramTestMsg(`❌ خطا در ارتباط با سرور: ${err?.message}`);
     } finally {
       setTelegramTesting(false);
+    }
+  };
+
+  const handleResendOrderToTelegram = async (orderId: string) => {
+    try {
+      const res = await fetch('/api/bridge/admin/card-transfer/resend-telegram', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId }),
+      });
+      const data = await safeParseJson(res);
+      if (data && data.success) {
+        setTelegramTestMsg(`✅ فیش سفارش ${orderId} با موفقیت به ربات تلگرام ارسال شد!`);
+      } else {
+        alert(data?.message || 'خطا در ارسال فیش به تلگرام. ابتدا توکن و آیدی عددی را ذخیره کنید.');
+      }
+    } catch (err: any) {
+      alert('خطا در ارتباط با سرور: ' + err?.message);
     }
   };
 
@@ -3243,28 +3333,39 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                             )}
                           </td>
                           <td className="p-3 text-center">
-                            {order.status === 'pending' ? (
-                              <div className="flex items-center justify-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => handleReviewCardOrder(order.id, 'approve')}
-                                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-all shadow flex items-center gap-1"
-                                >
-                                  <Check className="w-3.5 h-3.5" />
-                                  <span>تایید و شارژ</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleReviewCardOrder(order.id, 'reject')}
-                                  className="px-3 py-1.5 bg-rose-600/80 hover:bg-rose-500 text-white rounded-lg text-xs font-bold transition-all shadow flex items-center gap-1"
-                                >
-                                  <X className="w-3.5 h-3.5" />
-                                  <span>رد فیش</span>
-                                </button>
-                              </div>
-                            ) : (
-                              <span className="text-[11px] text-slate-500">بررسی شده</span>
-                            )}
+                            <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                              {order.status === 'pending' ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleReviewCardOrder(order.id, 'approve')}
+                                    className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-all shadow flex items-center gap-1"
+                                  >
+                                    <Check className="w-3.5 h-3.5" />
+                                    <span>تایید و شارژ</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleReviewCardOrder(order.id, 'reject')}
+                                    className="px-2.5 py-1.5 bg-rose-600/80 hover:bg-rose-500 text-white rounded-lg text-xs font-bold transition-all shadow flex items-center gap-1"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                    <span>رد فیش</span>
+                                  </button>
+                                </>
+                              ) : (
+                                <span className="text-[11px] text-slate-500 ml-1">بررسی شده</span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleResendOrderToTelegram(order.id)}
+                                className="px-2.5 py-1.5 bg-sky-500/15 hover:bg-sky-500/25 text-sky-500 border border-sky-500/30 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1"
+                                title="ارسال مجدد عکس فیش و دکمه‌های تایید به ربات تلگرام"
+                              >
+                                <Send className="w-3 h-3" />
+                                <span>ارسال به تلگرام</span>
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}

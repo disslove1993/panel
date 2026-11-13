@@ -1987,6 +1987,152 @@ async function startServer() {
     });
   });
 
+  // Helper: Escape HTML for Telegram HTML parse_mode
+  function escapeTgHtml(str: any): string {
+    return String(str ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  // Helper: Send notification to Telegram bot (Reliable raw multipart/form-data + fallback)
+  async function sendTelegramCardNotification(order: any, imageBuffer?: Buffer): Promise<boolean> {
+    const settings = bridgeStore.getSettings();
+    const botToken = (settings.telegramBotToken || '').trim();
+    const chatId = (settings.telegramAdminChatId || '').trim();
+
+    if (!botToken || !chatId) {
+      console.log('Telegram Bot Token or Admin Chat ID not set in bridgeStore, skipping Telegram notification.');
+      return false;
+    }
+
+    // If imageBuffer wasn't passed, try loading from disk or from order.receiptImageBase64
+    let finalImgBuffer: Buffer | undefined = imageBuffer;
+    if (!finalImgBuffer || finalImgBuffer.length === 0) {
+      const diskPath = path.resolve(__dirname, 'public/uploads/receipts', `${order.id}.jpg`);
+      if (fs.existsSync(diskPath)) {
+        try {
+          finalImgBuffer = fs.readFileSync(diskPath);
+        } catch {}
+      } else if (order.receiptImageBase64 && String(order.receiptImageBase64).length > 200 && !String(order.receiptImageBase64).endsWith('...')) {
+        try {
+          const cleanB64 = String(order.receiptImageBase64).replace(/^data:image\/[^;]+;base64,/, '').replace(/\s+/g, '');
+          finalImgBuffer = Buffer.from(cleanB64, 'base64');
+        } catch {}
+      }
+    }
+
+    const safeUser = escapeTgHtml(order.userName || 'کاربر اپلیکیشن');
+    const safeEmail = escapeTgHtml(order.userEmail || order.userId || '-');
+    const safeOrderId = escapeTgHtml(order.id);
+    const safeNotes = order.userNotes ? escapeTgHtml(order.userNotes) : '';
+
+    const caption = `💳 <b>رسید جدید پرداخت کارت به کارت</b>\n━━━━━━━━━━━━━━━━━━━━\n👤 <b>کاربر:</b> ${safeUser}\n📧 <b>ایمیل / شناسه:</b> <code>${safeEmail}</code>\n💎 <b>توکن درخواستی:</b> <b>${Number(order.tokens || 0).toLocaleString('fa-IR')} توکن</b>\n💰 <b>مبلغ فیش:</b> <b>${Number(order.amountTomans || 0).toLocaleString('fa-IR')} تومان</b>\n🆔 <b>کد سفارش:</b> <code>${safeOrderId}</code>\n⏰ <b>زمان ثبت:</b> ${new Date(order.createdAt || Date.now()).toLocaleDateString('fa-IR')} - ${new Date(order.createdAt || Date.now()).toLocaleTimeString('fa-IR')}\n${safeNotes ? `📝 <b>توضیح کاربر:</b> ${safeNotes}\n` : ''}━━━━━━━━━━━━━━━━━━━━\n⚠️ لطفاً پس از تطبیق واریز با گردش حساب بانکی، روی یکی از دکمه‌های زیر کلیک کنید:`;
+
+    const replyMarkup = {
+      inline_keyboard: [
+        [
+          { text: '✅ تایید و شارژ توکن', callback_data: `c2c_approve:${order.id}` },
+          { text: '❌ رد فیش واریزی', callback_data: `c2c_reject:${order.id}` },
+        ],
+      ],
+    };
+
+    try {
+      if (finalImgBuffer && finalImgBuffer.length > 0) {
+        // Build raw RFC 2046 multipart/form-data Buffer for 100% compatibility across all Node versions
+        const boundary = '----CheshmakTgBoundary' + Date.now().toString(16) + Math.random().toString(16).slice(2, 8);
+        const chunks: Buffer[] = [];
+        const appendField = (name: string, value: string) => {
+          chunks.push(
+            Buffer.from(
+              `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${value}\r\n`,
+              'utf-8'
+            )
+          );
+        };
+
+        appendField('chat_id', chatId);
+        appendField('caption', caption);
+        appendField('parse_mode', 'HTML');
+        appendField('reply_markup', JSON.stringify(replyMarkup));
+
+        chunks.push(
+          Buffer.from(
+            `--${boundary}\r\nContent-Disposition: form-data; name="photo"; filename="${order.id}.jpg"\r\nContent-Type: image/jpeg\r\n\r\n`,
+            'utf-8'
+          )
+        );
+        chunks.push(finalImgBuffer);
+        chunks.push(Buffer.from(`\r\n--${boundary}--\r\n`, 'utf-8'));
+
+        const multipartBody = Buffer.concat(chunks);
+
+        const resp = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': `multipart/form-data; boundary=${boundary}`,
+            'Content-Length': String(multipartBody.length),
+          },
+          body: multipartBody,
+        });
+
+        const data = (await resp.json()) as any;
+        if (data?.ok && data.result?.message_id) {
+          order.telegramMessageId = data.result.message_id;
+          bridgeStore.updateCardOrder(order);
+          return true;
+        }
+        console.warn('Telegram sendPhoto failed, falling back to sendMessage:', data);
+      }
+
+      // Fallback or text-only notification with inline Approve/Reject buttons
+      const textBody =
+        caption +
+        (order.receiptImageUrl && !order.receiptImageUrl.includes('localhost')
+          ? `\n\n🖼️ <a href="${escapeTgHtml(order.receiptImageUrl)}">مشاهده تصویر فیش در مرورگر</a>`
+          : '');
+
+      const resp = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: textBody,
+          parse_mode: 'HTML',
+          reply_markup: replyMarkup,
+        }),
+      });
+      const data = (await resp.json()) as any;
+      if (data?.ok && data.result?.message_id) {
+        order.telegramMessageId = data.result.message_id;
+        bridgeStore.updateCardOrder(order);
+        return true;
+      }
+      console.warn('Telegram sendMessage failed:', data);
+      return false;
+    } catch (err) {
+      console.error('Error sending Telegram card notification:', err);
+      return false;
+    }
+  }
+
+  // Helper: Send any pending card orders that haven't been delivered to Telegram yet
+  async function flushPendingCardOrdersToTelegram() {
+    try {
+      const settings = bridgeStore.getSettings();
+      if (!settings.telegramBotToken || !settings.telegramAdminChatId) return;
+      const pendingOrders = bridgeStore
+        .getAllCardOrders()
+        .filter((o) => o.status === 'pending' && !o.telegramMessageId);
+      for (const ord of pendingOrders) {
+        await sendTelegramCardNotification(ord);
+      }
+    } catch (e) {
+      console.warn('Error flushing pending card orders to Telegram:', e);
+    }
+  }
+
   // 24. Admin Settings: Update Zibal, Card-to-Card, Telegram, Sanaei Connection, Welcome Tokens, and Free Trial
   app.post('/api/bridge/admin/settings', (req, res) => {
     const {
@@ -2006,11 +2152,16 @@ async function startServer() {
       bankCardOwner,
       bankName,
       telegramBotToken,
+       botToken,
       telegramAdminChatId,
+      adminChatId,
       plans,
       walletPackages,
       giftCodes,
     } = req.body;
+
+    const finalBotToken = telegramBotToken !== undefined ? telegramBotToken : botToken;
+    const finalAdminChatId = telegramAdminChatId !== undefined ? telegramAdminChatId : adminChatId;
 
     const parsedWelcomeTokens = welcomeTokens !== undefined ? Math.max(0, Number(welcomeTokens)) : undefined;
     const parsedTrialGB = freeTrialTrafficGB !== undefined ? Math.max(0, Number(freeTrialTrafficGB)) : undefined;
@@ -2032,8 +2183,8 @@ async function startServer() {
       ...(bankCardNumber !== undefined ? { bankCardNumber: String(bankCardNumber).trim() } : {}),
       ...(bankCardOwner !== undefined ? { bankCardOwner: String(bankCardOwner).trim() } : {}),
       ...(bankName !== undefined ? { bankName: String(bankName).trim() } : {}),
-      ...(telegramBotToken !== undefined ? { telegramBotToken: String(telegramBotToken).trim() } : {}),
-      ...(telegramAdminChatId !== undefined ? { telegramAdminChatId: String(telegramAdminChatId).trim() } : {}),
+      ...(finalBotToken !== undefined ? { telegramBotToken: String(finalBotToken).trim() } : {}),
+      ...(finalAdminChatId !== undefined ? { telegramAdminChatId: String(finalAdminChatId).trim() } : {}),
       ...(Array.isArray(plans) ? { plans } : {}),
       ...(Array.isArray(walletPackages) ? { walletPackages } : {}),
       ...(Array.isArray(giftCodes) ? { giftCodes } : {}),
@@ -2049,6 +2200,11 @@ async function startServer() {
           name: `تست اولیه رایگان - ${parsedTrialGB !== undefined ? parsedTrialGB : trialPlan.trafficGB} گیگابایت`,
         });
       }
+    }
+
+    // If Telegram credentials were just configured, flush any pending receipts to Telegram
+    if (updated.telegramBotToken && updated.telegramAdminChatId) {
+      flushPendingCardOrdersToTelegram().catch(() => {});
     }
 
     res.json({ success: true, settings: updated });
@@ -2073,75 +2229,6 @@ async function startServer() {
       telegramBotConfigured: !!(settings.telegramBotToken && settings.telegramAdminChatId),
     });
   });
-
-  // Helper: Send notification to Telegram bot
-  async function sendTelegramCardNotification(order: any, imageBuffer?: Buffer): Promise<boolean> {
-    const settings = bridgeStore.getSettings();
-    if (!settings.telegramBotToken || !settings.telegramAdminChatId) {
-      console.log('Telegram Bot Token or Admin Chat ID not set, skipping Telegram notification.');
-      return false;
-    }
-
-    const botToken = settings.telegramBotToken.trim();
-    const chatId = settings.telegramAdminChatId.trim();
-
-    const caption = `💳 <b>رسید جدید پرداخت کارت به کارت</b>\n━━━━━━━━━━━━━━━━━━━━\n👤 <b>کاربر:</b> ${order.userName || 'کاربر اپلیکیشن'}\n📧 <b>ایمیل / شناسه:</b> <code>${order.userEmail}</code>\n💎 <b>توکن درخواستی:</b> <b>${order.tokens.toLocaleString('fa-IR')} توکن</b>\n💰 <b>مبلغ فیش:</b> <b>${order.amountTomans.toLocaleString('fa-IR')} تومان</b>\n🆔 <b>کد سفارش:</b> <code>${order.id}</code>\n⏰ <b>زمان ثبت:</b> ${new Date(order.createdAt).toLocaleDateString('fa-IR')} - ${new Date(order.createdAt).toLocaleTimeString('fa-IR')}\n${order.userNotes ? `📝 <b>توضیح کاربر:</b> ${order.userNotes}\n` : ''}━━━━━━━━━━━━━━━━━━━━\n⚠️ لطفاً پس از تطبیق واریز با گردش حساب بانکی، روی یکی از دکمه‌های زیر کلیک کنید:`;
-
-    const replyMarkup = {
-      inline_keyboard: [
-        [
-          { text: '✅ تایید و شارژ توکن', callback_data: `c2c_approve:${order.id}` },
-          { text: '❌ رد فیش واریزی', callback_data: `c2c_reject:${order.id}` },
-        ],
-      ],
-    };
-
-    try {
-      if (imageBuffer && imageBuffer.length > 0) {
-        const formData = new FormData();
-        formData.append('chat_id', chatId);
-        formData.append('caption', caption);
-        formData.append('parse_mode', 'HTML');
-        formData.append('reply_markup', JSON.stringify(replyMarkup));
-        const blob = new Blob([imageBuffer as any], { type: 'image/jpeg' });
-        formData.append('photo', blob, `${order.id}.jpg`);
-
-        const resp = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
-          method: 'POST',
-          body: formData,
-        });
-        const data = await resp.json() as any;
-        if (data?.ok && data.result?.message_id) {
-          order.telegramMessageId = data.result.message_id;
-          bridgeStore.updateCardOrder(order);
-          return true;
-        }
-        console.warn('Telegram sendPhoto response:', data);
-      }
-
-      // Fallback or text-only
-      const resp = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: caption + (order.receiptImageUrl ? `\n\n🖼️ <a href="${order.receiptImageUrl}">مشاهده فیش در مرورگر</a>` : ''),
-          parse_mode: 'HTML',
-          reply_markup: replyMarkup,
-        }),
-      });
-      const data = await resp.json() as any;
-      if (data?.ok && data.result?.message_id) {
-        order.telegramMessageId = data.result.message_id;
-        bridgeStore.updateCardOrder(order);
-        return true;
-      }
-      return false;
-    } catch (err) {
-      console.error('Error sending Telegram card notification:', err);
-      return false;
-    }
-  }
 
   // Helper: Telegram Bot Callback Handler (used by both Long Polling and Webhook)
   async function handleTelegramCallbackQuery(cb: any) {
@@ -2225,7 +2312,7 @@ async function startServer() {
         const botToken = settings.telegramBotToken?.trim();
 
         if (!botToken) {
-          await new Promise((r) => setTimeout(r, 8000));
+          await new Promise((r) => setTimeout(r, 4000));
           continue;
         }
 
@@ -2238,7 +2325,7 @@ async function startServer() {
           continue;
         }
 
-        const data = await resp.json() as any;
+        const data = (await resp.json()) as any;
         if (data?.ok && Array.isArray(data.result)) {
           for (const update of data.result) {
             offset = Math.max(offset, update.update_id + 1);
@@ -2256,13 +2343,33 @@ async function startServer() {
   // Start polling in background
   runTelegramPollingLoop().catch((err) => console.error('Telegram loop error:', err));
 
-  // 26. Card-to-Card: Submit Order & Receipt Photo
-  app.post('/api/bridge/card-transfer/submit', async (req, res) => {
+  // 26. Card-to-Card: Submit Order & Receipt Photo (Supports both /card-transfer/submit and /payment/card-to-card/submit)
+  app.post(['/api/bridge/card-transfer/submit', '/api/bridge/payment/card-to-card/submit'], async (req, res) => {
     try {
-      const { userId, packageId, tokens: customTokens, amountTomans: customAmount, receiptImageBase64, userNotes } = req.body;
-      const user = bridgeStore.findUserByIdOrEmail(userId);
+      const {
+        userId,
+        email,
+        userEmail,
+        identifier,
+        packageId,
+        tokens: customTokens,
+        amountTomans: customAmount,
+        receiptImageBase64,
+        receiptImage,
+        imageBase64,
+        image,
+        photo,
+        userNotes,
+      } = req.body;
+
+      const targetIdentifier = userId || email || userEmail || identifier;
+      if (!targetIdentifier) {
+        return res.status(400).json({ success: false, message: 'شناسه کاربر (userId یا email) الزامی است.' });
+      }
+
+      let user = bridgeStore.findUserByIdOrEmail(String(targetIdentifier));
       if (!user) {
-        return res.status(404).json({ success: false, message: 'کاربر ثبت نام شده یافت نشد.' });
+        user = bridgeStore.createUser({ email: String(targetIdentifier) });
       }
 
       let tokens = 100;
@@ -2274,25 +2381,39 @@ async function startServer() {
           tokens = pack.tokens + (pack.bonusTokens || 0);
           amountTomans = pack.priceTomans;
         }
-      } else if (customTokens && Number(customTokens) > 0) {
+      }
+      if (customTokens && Number(customTokens) > 0) {
         tokens = Number(customTokens);
-        amountTomans = customAmount ? Number(customAmount) : tokens * 100;
+      }
+      if (customAmount && Number(customAmount) > 0) {
+        amountTomans = Number(customAmount);
       }
 
+      const rawReceiptImg = receiptImageBase64 || receiptImage || imageBase64 || image || photo || '';
       const orderId = `c2c_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       let receiptImageUrl = '';
       let imgBuffer: Buffer | undefined = undefined;
+      let storedBase64DataUri: string | undefined = undefined;
 
-      if (receiptImageBase64) {
+      if (rawReceiptImg) {
         try {
-          const cleanBase64 = String(receiptImageBase64).replace(/^data:image\/\w+;base64,/, '');
+          const cleanBase64 = String(rawReceiptImg)
+            .replace(/^data:image\/[^;]+;base64,/, '')
+            .replace(/\s+/g, '');
           imgBuffer = Buffer.from(cleanBase64, 'base64');
           const fileName = `${orderId}.jpg`;
-          const filePath = path.resolve(__dirname, 'public/uploads/receipts', fileName);
+          const uploadDir = path.resolve(__dirname, 'public/uploads/receipts');
+          if (!fs.existsSync(uploadDir)) {
+            fs.mkdirSync(uploadDir, { recursive: true });
+          }
+          const filePath = path.resolve(uploadDir, fileName);
           fs.writeFileSync(filePath, imgBuffer);
           const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
           const host = req.get('host') || 'localhost:3000';
           receiptImageUrl = `${proto}://${host}/uploads/receipts/${fileName}`;
+          if (cleanBase64.length < 2_500_000) {
+            storedBase64DataUri = `data:image/jpeg;base64,${cleanBase64}`;
+          }
         } catch (saveErr) {
           console.warn('Could not save receipt image to disk:', saveErr);
         }
@@ -2305,20 +2426,21 @@ async function startServer() {
         userName: user.name || 'کاربر',
         tokens,
         amountTomans,
-        receiptImageBase64: receiptImageBase64 ? String(receiptImageBase64).substring(0, 100) + '...' : undefined,
-        receiptImageUrl,
+        receiptImageBase64: storedBase64DataUri,
+        receiptImageUrl: receiptImageUrl || storedBase64DataUri || '',
         userNotes: userNotes ? String(userNotes).trim() : '',
         status: 'pending',
         createdAt: Date.now(),
       });
 
-      // Send alert to Telegram bot in background
-      sendTelegramCardNotification(order, imgBuffer).catch((tErr) => console.warn('Telegram notify error:', tErr));
+      // Await sending alert to Telegram bot so we know immediately if it succeeded
+      const telegramSent = await sendTelegramCardNotification(order, imgBuffer);
 
       res.json({
         success: true,
         orderId,
         order,
+        telegramSent,
         message: 'رسید پرداخت با موفقیت ارسال شد و در صف تایید مدیریت قرار گرفت.',
       });
     } catch (err: any) {
@@ -2327,8 +2449,28 @@ async function startServer() {
     }
   });
 
+  // 26.1. Resend a Card-to-Card Order to Telegram manually from Web Panel
+  app.post('/api/bridge/admin/card-transfer/resend-telegram', async (req, res) => {
+    try {
+      const { orderId } = req.body;
+      const order = bridgeStore.getCardOrder(orderId);
+      if (!order) {
+        return res.status(404).json({ success: false, message: 'سفارش یافت نشد.' });
+      }
+      const sent = await sendTelegramCardNotification(order);
+      res.json({
+        success: sent,
+        message: sent
+          ? 'فیش واریزی با موفقیت به ربات تلگرام ارسال شد.'
+          : 'ارسال به تلگرام انجام نشد. لطفاً توکن ربات و Chat ID را بررسی کنید.',
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err?.message || 'خطا در ارسال به تلگرام' });
+    }
+  });
+
   // 27. Card-to-Card: Check Order Status (Mobile App Polling)
-  app.get('/api/bridge/card-transfer/status/:orderId', (req, res) => {
+  app.get(['/api/bridge/card-transfer/status/:orderId', '/api/bridge/payment/card-to-card/status/:orderId'], (req, res) => {
     const order = bridgeStore.getCardOrder(req.params.orderId);
     if (!order) {
       return res.status(404).json({ success: false, message: 'رسید پرداخت یافت نشد.' });
@@ -2426,13 +2568,22 @@ async function startServer() {
     }
   });
 
-  // 31. Telegram Test Connection Endpoint
+  // 31. Telegram Test Connection Endpoint (Also saves Bot Token & Chat ID to bridgeStore!)
   app.post('/api/bridge/telegram/test', async (req, res) => {
     try {
-      const { botToken: customToken, adminChatId: customChatId } = req.body;
+      const {
+        botToken: customToken,
+        telegramBotToken,
+        adminChatId: customChatId,
+        telegramAdminChatId,
+        bankCardNumber,
+        bankCardOwner,
+        bankName,
+        cardToCardEnabled,
+      } = req.body;
       const settings = bridgeStore.getSettings();
-      const botToken = (customToken || settings.telegramBotToken || '').trim();
-      const chatId = (customChatId || settings.telegramAdminChatId || '').trim();
+      const botToken = String(customToken || telegramBotToken || settings.telegramBotToken || '').trim();
+      const chatId = String(customChatId || telegramAdminChatId || settings.telegramAdminChatId || '').trim();
 
       if (!botToken || !chatId) {
         return res.status(400).json({
@@ -2441,7 +2592,17 @@ async function startServer() {
         });
       }
 
-      const text = `🟢 <b>پیام تست اتصال پنل میانه ثنایی به تلگرام</b>\n━━━━━━━━━━━━━━━━━━━━\nربات تلگرام با موفقیت متصل شد!\nاز این پس هنگامی که کاربر در اپلیکیشن از طریق کارت به کارت خرید کند، عکس فیش واریزی و دکمه‌های تایید/رد آنی در این چت ارسال می‌شود.\n⏰ زمان تست: ${new Date().toLocaleDateString('fa-IR')} ${new Date().toLocaleTimeString('fa-IR')}`;
+      // Immediately persist the Telegram Bot Token and Admin Chat ID in bridgeStore so they are never lost on refresh!
+      bridgeStore.updateSettings({
+        telegramBotToken: botToken,
+        telegramAdminChatId: chatId,
+        ...(bankCardNumber !== undefined ? { bankCardNumber: String(bankCardNumber).trim() } : {}),
+        ...(bankCardOwner !== undefined ? { bankCardOwner: String(bankCardOwner).trim() } : {}),
+        ...(bankName !== undefined ? { bankName: String(bankName).trim() } : {}),
+        ...(cardToCardEnabled !== undefined ? { cardToCardEnabled: Boolean(cardToCardEnabled) } : {}),
+      });
+
+      const text = `🟢 <b>پیام تست اتصال پنل چشمک (نسخه ۴) به تلگرام</b>\n━━━━━━━━━━━━━━━━━━━━\n✅ ربات تلگرام با موفقیت متصل و در سرور ذخیره شد!\nاز این پس هنگامی که کاربر در اپلیکیشن از طریق کارت به کارت خرید کند، عکس فیش واریزی و دکمه‌های تایید/رد آنی در این چت ارسال می‌شود.\n⏰ زمان تست: ${new Date().toLocaleDateString('fa-IR')} ${new Date().toLocaleTimeString('fa-IR')}`;
 
       const resp = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
         method: 'POST',
@@ -2453,11 +2614,15 @@ async function startServer() {
         }),
       });
 
-      const data = await resp.json() as any;
+      const data = (await resp.json()) as any;
       if (data?.ok) {
+        // Also flush any pending receipts that arrived before Telegram was connected
+        flushPendingCardOrdersToTelegram().catch(() => {});
+
         return res.json({
           success: true,
-          message: 'پیام تست با موفقیت به تلگرام شما ارسال گردید! تلگرام خود را چک کنید.',
+          settings: bridgeStore.getSettings(),
+          message: 'پیام تست ارسال شد و توکن و آیدی تلگرام به صورت دائمی ذخیره گردید!',
         });
       } else {
         return res.status(400).json({

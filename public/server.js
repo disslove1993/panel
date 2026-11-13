@@ -5,12 +5,20 @@ import https from "https";
 import path2 from "path";
 import fs2 from "fs";
 import { execSync } from "child_process";
-import { fileURLToPath } from "url";
+import { fileURLToPath as fileURLToPath2 } from "url";
 
 // bridgeStore.ts
 import fs from "fs";
 import path from "path";
-var STORE_PATH = path.resolve(process.cwd(), "bridge_store.json");
+import { fileURLToPath } from "url";
+var __storeDir = (() => {
+  try {
+    return path.dirname(fileURLToPath(import.meta.url));
+  } catch {
+    return process.cwd();
+  }
+})();
+var STORE_PATH = fs.existsSync(path.resolve(process.cwd(), "bridge_store.json")) ? path.resolve(process.cwd(), "bridge_store.json") : path.resolve(__storeDir, "bridge_store.json");
 var DEFAULT_PLANS = [
   {
     id: "plan_1m_10gb",
@@ -854,7 +862,7 @@ function formatServersList(inbounds) {
 }
 
 // server.ts
-var __filename = fileURLToPath(import.meta.url);
+var __filename = fileURLToPath2(import.meta.url);
 var __dirname = path2.dirname(__filename);
 function normalizePanelBaseUrl(rawUrl, extraBasePath) {
   let trimmed = (rawUrl || "").trim();
@@ -2484,6 +2492,145 @@ async function startServer() {
       isPaid: order.status === "paid"
     });
   });
+  function escapeTgHtml(str) {
+    return String(str ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  async function sendTelegramCardNotification(order, imageBuffer) {
+    const settings = bridgeStore.getSettings();
+    const botToken = (settings.telegramBotToken || "").trim();
+    const chatId = (settings.telegramAdminChatId || "").trim();
+    if (!botToken || !chatId) {
+      console.log("Telegram Bot Token or Admin Chat ID not set in bridgeStore, skipping Telegram notification.");
+      return false;
+    }
+    let finalImgBuffer = imageBuffer;
+    if (!finalImgBuffer || finalImgBuffer.length === 0) {
+      const diskPath = path2.resolve(__dirname, "public/uploads/receipts", `${order.id}.jpg`);
+      if (fs2.existsSync(diskPath)) {
+        try {
+          finalImgBuffer = fs2.readFileSync(diskPath);
+        } catch {
+        }
+      } else if (order.receiptImageBase64 && String(order.receiptImageBase64).length > 200 && !String(order.receiptImageBase64).endsWith("...")) {
+        try {
+          const cleanB64 = String(order.receiptImageBase64).replace(/^data:image\/[^;]+;base64,/, "").replace(/\s+/g, "");
+          finalImgBuffer = Buffer.from(cleanB64, "base64");
+        } catch {
+        }
+      }
+    }
+    const safeUser = escapeTgHtml(order.userName || "\u06A9\u0627\u0631\u0628\u0631 \u0627\u067E\u0644\u06CC\u06A9\u06CC\u0634\u0646");
+    const safeEmail = escapeTgHtml(order.userEmail || order.userId || "-");
+    const safeOrderId = escapeTgHtml(order.id);
+    const safeNotes = order.userNotes ? escapeTgHtml(order.userNotes) : "";
+    const caption = `\u{1F4B3} <b>\u0631\u0633\u06CC\u062F \u062C\u062F\u06CC\u062F \u067E\u0631\u062F\u0627\u062E\u062A \u06A9\u0627\u0631\u062A \u0628\u0647 \u06A9\u0627\u0631\u062A</b>
+\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
+\u{1F464} <b>\u06A9\u0627\u0631\u0628\u0631:</b> ${safeUser}
+\u{1F4E7} <b>\u0627\u06CC\u0645\u06CC\u0644 / \u0634\u0646\u0627\u0633\u0647:</b> <code>${safeEmail}</code>
+\u{1F48E} <b>\u062A\u0648\u06A9\u0646 \u062F\u0631\u062E\u0648\u0627\u0633\u062A\u06CC:</b> <b>${Number(order.tokens || 0).toLocaleString("fa-IR")} \u062A\u0648\u06A9\u0646</b>
+\u{1F4B0} <b>\u0645\u0628\u0644\u063A \u0641\u06CC\u0634:</b> <b>${Number(order.amountTomans || 0).toLocaleString("fa-IR")} \u062A\u0648\u0645\u0627\u0646</b>
+\u{1F194} <b>\u06A9\u062F \u0633\u0641\u0627\u0631\u0634:</b> <code>${safeOrderId}</code>
+\u23F0 <b>\u0632\u0645\u0627\u0646 \u062B\u0628\u062A:</b> ${new Date(order.createdAt || Date.now()).toLocaleDateString("fa-IR")} - ${new Date(order.createdAt || Date.now()).toLocaleTimeString("fa-IR")}
+${safeNotes ? `\u{1F4DD} <b>\u062A\u0648\u0636\u06CC\u062D \u06A9\u0627\u0631\u0628\u0631:</b> ${safeNotes}
+` : ""}\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
+\u26A0\uFE0F \u0644\u0637\u0641\u0627\u064B \u067E\u0633 \u0627\u0632 \u062A\u0637\u0628\u06CC\u0642 \u0648\u0627\u0631\u06CC\u0632 \u0628\u0627 \u06AF\u0631\u062F\u0634 \u062D\u0633\u0627\u0628 \u0628\u0627\u0646\u06A9\u06CC\u060C \u0631\u0648\u06CC \u06CC\u06A9\u06CC \u0627\u0632 \u062F\u06A9\u0645\u0647\u200C\u0647\u0627\u06CC \u0632\u06CC\u0631 \u06A9\u0644\u06CC\u06A9 \u06A9\u0646\u06CC\u062F:`;
+    const replyMarkup = {
+      inline_keyboard: [
+        [
+          { text: "\u2705 \u062A\u0627\u06CC\u06CC\u062F \u0648 \u0634\u0627\u0631\u0698 \u062A\u0648\u06A9\u0646", callback_data: `c2c_approve:${order.id}` },
+          { text: "\u274C \u0631\u062F \u0641\u06CC\u0634 \u0648\u0627\u0631\u06CC\u0632\u06CC", callback_data: `c2c_reject:${order.id}` }
+        ]
+      ]
+    };
+    try {
+      if (finalImgBuffer && finalImgBuffer.length > 0) {
+        const boundary = "----CheshmakTgBoundary" + Date.now().toString(16) + Math.random().toString(16).slice(2, 8);
+        const chunks = [];
+        const appendField = (name, value) => {
+          chunks.push(
+            Buffer.from(
+              `--${boundary}\r
+Content-Disposition: form-data; name="${name}"\r
+\r
+${value}\r
+`,
+              "utf-8"
+            )
+          );
+        };
+        appendField("chat_id", chatId);
+        appendField("caption", caption);
+        appendField("parse_mode", "HTML");
+        appendField("reply_markup", JSON.stringify(replyMarkup));
+        chunks.push(
+          Buffer.from(
+            `--${boundary}\r
+Content-Disposition: form-data; name="photo"; filename="${order.id}.jpg"\r
+Content-Type: image/jpeg\r
+\r
+`,
+            "utf-8"
+          )
+        );
+        chunks.push(finalImgBuffer);
+        chunks.push(Buffer.from(`\r
+--${boundary}--\r
+`, "utf-8"));
+        const multipartBody = Buffer.concat(chunks);
+        const resp2 = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+          method: "POST",
+          headers: {
+            "Content-Type": `multipart/form-data; boundary=${boundary}`,
+            "Content-Length": String(multipartBody.length)
+          },
+          body: multipartBody
+        });
+        const data2 = await resp2.json();
+        if (data2?.ok && data2.result?.message_id) {
+          order.telegramMessageId = data2.result.message_id;
+          bridgeStore.updateCardOrder(order);
+          return true;
+        }
+        console.warn("Telegram sendPhoto failed, falling back to sendMessage:", data2);
+      }
+      const textBody = caption + (order.receiptImageUrl && !order.receiptImageUrl.includes("localhost") ? `
+
+\u{1F5BC}\uFE0F <a href="${escapeTgHtml(order.receiptImageUrl)}">\u0645\u0634\u0627\u0647\u062F\u0647 \u062A\u0635\u0648\u06CC\u0631 \u0641\u06CC\u0634 \u062F\u0631 \u0645\u0631\u0648\u0631\u06AF\u0631</a>` : "");
+      const resp = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: textBody,
+          parse_mode: "HTML",
+          reply_markup: replyMarkup
+        })
+      });
+      const data = await resp.json();
+      if (data?.ok && data.result?.message_id) {
+        order.telegramMessageId = data.result.message_id;
+        bridgeStore.updateCardOrder(order);
+        return true;
+      }
+      console.warn("Telegram sendMessage failed:", data);
+      return false;
+    } catch (err) {
+      console.error("Error sending Telegram card notification:", err);
+      return false;
+    }
+  }
+  async function flushPendingCardOrdersToTelegram() {
+    try {
+      const settings = bridgeStore.getSettings();
+      if (!settings.telegramBotToken || !settings.telegramAdminChatId) return;
+      const pendingOrders = bridgeStore.getAllCardOrders().filter((o) => o.status === "pending" && !o.telegramMessageId);
+      for (const ord of pendingOrders) {
+        await sendTelegramCardNotification(ord);
+      }
+    } catch (e) {
+      console.warn("Error flushing pending card orders to Telegram:", e);
+    }
+  }
   app.post("/api/bridge/admin/settings", (req, res) => {
     const {
       sanaeiPanelUrl,
@@ -2502,11 +2649,15 @@ async function startServer() {
       bankCardOwner,
       bankName,
       telegramBotToken,
+      botToken,
       telegramAdminChatId,
+      adminChatId,
       plans,
       walletPackages,
       giftCodes
     } = req.body;
+    const finalBotToken = telegramBotToken !== void 0 ? telegramBotToken : botToken;
+    const finalAdminChatId = telegramAdminChatId !== void 0 ? telegramAdminChatId : adminChatId;
     const parsedWelcomeTokens = welcomeTokens !== void 0 ? Math.max(0, Number(welcomeTokens)) : void 0;
     const parsedTrialGB = freeTrialTrafficGB !== void 0 ? Math.max(0, Number(freeTrialTrafficGB)) : void 0;
     const parsedTrialDays = freeTrialDays !== void 0 ? Math.max(1, Number(freeTrialDays)) : void 0;
@@ -2526,8 +2677,8 @@ async function startServer() {
       ...bankCardNumber !== void 0 ? { bankCardNumber: String(bankCardNumber).trim() } : {},
       ...bankCardOwner !== void 0 ? { bankCardOwner: String(bankCardOwner).trim() } : {},
       ...bankName !== void 0 ? { bankName: String(bankName).trim() } : {},
-      ...telegramBotToken !== void 0 ? { telegramBotToken: String(telegramBotToken).trim() } : {},
-      ...telegramAdminChatId !== void 0 ? { telegramAdminChatId: String(telegramAdminChatId).trim() } : {},
+      ...finalBotToken !== void 0 ? { telegramBotToken: String(finalBotToken).trim() } : {},
+      ...finalAdminChatId !== void 0 ? { telegramAdminChatId: String(finalAdminChatId).trim() } : {},
       ...Array.isArray(plans) ? { plans } : {},
       ...Array.isArray(walletPackages) ? { walletPackages } : {},
       ...Array.isArray(giftCodes) ? { giftCodes } : {}
@@ -2541,6 +2692,10 @@ async function startServer() {
           name: `\u062A\u0633\u062A \u0627\u0648\u0644\u06CC\u0647 \u0631\u0627\u06CC\u06AF\u0627\u0646 - ${parsedTrialGB !== void 0 ? parsedTrialGB : trialPlan.trafficGB} \u06AF\u06CC\u06AF\u0627\u0628\u0627\u06CC\u062A`
         });
       }
+    }
+    if (updated.telegramBotToken && updated.telegramAdminChatId) {
+      flushPendingCardOrdersToTelegram().catch(() => {
+      });
     }
     res.json({ success: true, settings: updated });
   });
@@ -2562,78 +2717,6 @@ async function startServer() {
       telegramBotConfigured: !!(settings.telegramBotToken && settings.telegramAdminChatId)
     });
   });
-  async function sendTelegramCardNotification(order, imageBuffer) {
-    const settings = bridgeStore.getSettings();
-    if (!settings.telegramBotToken || !settings.telegramAdminChatId) {
-      console.log("Telegram Bot Token or Admin Chat ID not set, skipping Telegram notification.");
-      return false;
-    }
-    const botToken = settings.telegramBotToken.trim();
-    const chatId = settings.telegramAdminChatId.trim();
-    const caption = `\u{1F4B3} <b>\u0631\u0633\u06CC\u062F \u062C\u062F\u06CC\u062F \u067E\u0631\u062F\u0627\u062E\u062A \u06A9\u0627\u0631\u062A \u0628\u0647 \u06A9\u0627\u0631\u062A</b>
-\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
-\u{1F464} <b>\u06A9\u0627\u0631\u0628\u0631:</b> ${order.userName || "\u06A9\u0627\u0631\u0628\u0631 \u0627\u067E\u0644\u06CC\u06A9\u06CC\u0634\u0646"}
-\u{1F4E7} <b>\u0627\u06CC\u0645\u06CC\u0644 / \u0634\u0646\u0627\u0633\u0647:</b> <code>${order.userEmail}</code>
-\u{1F48E} <b>\u062A\u0648\u06A9\u0646 \u062F\u0631\u062E\u0648\u0627\u0633\u062A\u06CC:</b> <b>${order.tokens.toLocaleString("fa-IR")} \u062A\u0648\u06A9\u0646</b>
-\u{1F4B0} <b>\u0645\u0628\u0644\u063A \u0641\u06CC\u0634:</b> <b>${order.amountTomans.toLocaleString("fa-IR")} \u062A\u0648\u0645\u0627\u0646</b>
-\u{1F194} <b>\u06A9\u062F \u0633\u0641\u0627\u0631\u0634:</b> <code>${order.id}</code>
-\u23F0 <b>\u0632\u0645\u0627\u0646 \u062B\u0628\u062A:</b> ${new Date(order.createdAt).toLocaleDateString("fa-IR")} - ${new Date(order.createdAt).toLocaleTimeString("fa-IR")}
-${order.userNotes ? `\u{1F4DD} <b>\u062A\u0648\u0636\u06CC\u062D \u06A9\u0627\u0631\u0628\u0631:</b> ${order.userNotes}
-` : ""}\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
-\u26A0\uFE0F \u0644\u0637\u0641\u0627\u064B \u067E\u0633 \u0627\u0632 \u062A\u0637\u0628\u06CC\u0642 \u0648\u0627\u0631\u06CC\u0632 \u0628\u0627 \u06AF\u0631\u062F\u0634 \u062D\u0633\u0627\u0628 \u0628\u0627\u0646\u06A9\u06CC\u060C \u0631\u0648\u06CC \u06CC\u06A9\u06CC \u0627\u0632 \u062F\u06A9\u0645\u0647\u200C\u0647\u0627\u06CC \u0632\u06CC\u0631 \u06A9\u0644\u06CC\u06A9 \u06A9\u0646\u06CC\u062F:`;
-    const replyMarkup = {
-      inline_keyboard: [
-        [
-          { text: "\u2705 \u062A\u0627\u06CC\u06CC\u062F \u0648 \u0634\u0627\u0631\u0698 \u062A\u0648\u06A9\u0646", callback_data: `c2c_approve:${order.id}` },
-          { text: "\u274C \u0631\u062F \u0641\u06CC\u0634 \u0648\u0627\u0631\u06CC\u0632\u06CC", callback_data: `c2c_reject:${order.id}` }
-        ]
-      ]
-    };
-    try {
-      if (imageBuffer && imageBuffer.length > 0) {
-        const formData = new FormData();
-        formData.append("chat_id", chatId);
-        formData.append("caption", caption);
-        formData.append("parse_mode", "HTML");
-        formData.append("reply_markup", JSON.stringify(replyMarkup));
-        const blob = new Blob([imageBuffer], { type: "image/jpeg" });
-        formData.append("photo", blob, `${order.id}.jpg`);
-        const resp2 = await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
-          method: "POST",
-          body: formData
-        });
-        const data2 = await resp2.json();
-        if (data2?.ok && data2.result?.message_id) {
-          order.telegramMessageId = data2.result.message_id;
-          bridgeStore.updateCardOrder(order);
-          return true;
-        }
-        console.warn("Telegram sendPhoto response:", data2);
-      }
-      const resp = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: caption + (order.receiptImageUrl ? `
-
-\u{1F5BC}\uFE0F <a href="${order.receiptImageUrl}">\u0645\u0634\u0627\u0647\u062F\u0647 \u0641\u06CC\u0634 \u062F\u0631 \u0645\u0631\u0648\u0631\u06AF\u0631</a>` : ""),
-          parse_mode: "HTML",
-          reply_markup: replyMarkup
-        })
-      });
-      const data = await resp.json();
-      if (data?.ok && data.result?.message_id) {
-        order.telegramMessageId = data.result.message_id;
-        bridgeStore.updateCardOrder(order);
-        return true;
-      }
-      return false;
-    } catch (err) {
-      console.error("Error sending Telegram card notification:", err);
-      return false;
-    }
-  }
   async function handleTelegramCallbackQuery(cb) {
     const settings = bridgeStore.getSettings();
     const botToken = settings.telegramBotToken?.trim();
@@ -2712,7 +2795,7 @@ ${statusText}`;
         const settings = bridgeStore.getSettings();
         const botToken = settings.telegramBotToken?.trim();
         if (!botToken) {
-          await new Promise((r) => setTimeout(r, 8e3));
+          await new Promise((r) => setTimeout(r, 4e3));
           continue;
         }
         const resp = await fetch(`https://api.telegram.org/bot${botToken}/getUpdates?offset=${offset}&timeout=15`, {
@@ -2737,12 +2820,30 @@ ${statusText}`;
     }
   }
   runTelegramPollingLoop().catch((err) => console.error("Telegram loop error:", err));
-  app.post("/api/bridge/card-transfer/submit", async (req, res) => {
+  app.post(["/api/bridge/card-transfer/submit", "/api/bridge/payment/card-to-card/submit"], async (req, res) => {
     try {
-      const { userId, packageId, tokens: customTokens, amountTomans: customAmount, receiptImageBase64, userNotes } = req.body;
-      const user = bridgeStore.findUserByIdOrEmail(userId);
+      const {
+        userId,
+        email,
+        userEmail,
+        identifier,
+        packageId,
+        tokens: customTokens,
+        amountTomans: customAmount,
+        receiptImageBase64,
+        receiptImage,
+        imageBase64,
+        image,
+        photo,
+        userNotes
+      } = req.body;
+      const targetIdentifier = userId || email || userEmail || identifier;
+      if (!targetIdentifier) {
+        return res.status(400).json({ success: false, message: "\u0634\u0646\u0627\u0633\u0647 \u06A9\u0627\u0631\u0628\u0631 (userId \u06CC\u0627 email) \u0627\u0644\u0632\u0627\u0645\u06CC \u0627\u0633\u062A." });
+      }
+      let user = bridgeStore.findUserByIdOrEmail(String(targetIdentifier));
       if (!user) {
-        return res.status(404).json({ success: false, message: "\u06A9\u0627\u0631\u0628\u0631 \u062B\u0628\u062A \u0646\u0627\u0645 \u0634\u062F\u0647 \u06CC\u0627\u0641\u062A \u0646\u0634\u062F." });
+        user = bridgeStore.createUser({ email: String(targetIdentifier) });
       }
       let tokens = 100;
       let amountTomans = 1e4;
@@ -2752,23 +2853,35 @@ ${statusText}`;
           tokens = pack.tokens + (pack.bonusTokens || 0);
           amountTomans = pack.priceTomans;
         }
-      } else if (customTokens && Number(customTokens) > 0) {
-        tokens = Number(customTokens);
-        amountTomans = customAmount ? Number(customAmount) : tokens * 100;
       }
+      if (customTokens && Number(customTokens) > 0) {
+        tokens = Number(customTokens);
+      }
+      if (customAmount && Number(customAmount) > 0) {
+        amountTomans = Number(customAmount);
+      }
+      const rawReceiptImg = receiptImageBase64 || receiptImage || imageBase64 || image || photo || "";
       const orderId = `c2c_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       let receiptImageUrl = "";
       let imgBuffer = void 0;
-      if (receiptImageBase64) {
+      let storedBase64DataUri = void 0;
+      if (rawReceiptImg) {
         try {
-          const cleanBase64 = String(receiptImageBase64).replace(/^data:image\/\w+;base64,/, "");
+          const cleanBase64 = String(rawReceiptImg).replace(/^data:image\/[^;]+;base64,/, "").replace(/\s+/g, "");
           imgBuffer = Buffer.from(cleanBase64, "base64");
           const fileName = `${orderId}.jpg`;
-          const filePath = path2.resolve(__dirname, "public/uploads/receipts", fileName);
+          const uploadDir = path2.resolve(__dirname, "public/uploads/receipts");
+          if (!fs2.existsSync(uploadDir)) {
+            fs2.mkdirSync(uploadDir, { recursive: true });
+          }
+          const filePath = path2.resolve(uploadDir, fileName);
           fs2.writeFileSync(filePath, imgBuffer);
           const proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
           const host = req.get("host") || "localhost:3000";
           receiptImageUrl = `${proto}://${host}/uploads/receipts/${fileName}`;
+          if (cleanBase64.length < 25e5) {
+            storedBase64DataUri = `data:image/jpeg;base64,${cleanBase64}`;
+          }
         } catch (saveErr) {
           console.warn("Could not save receipt image to disk:", saveErr);
         }
@@ -2780,17 +2893,18 @@ ${statusText}`;
         userName: user.name || "\u06A9\u0627\u0631\u0628\u0631",
         tokens,
         amountTomans,
-        receiptImageBase64: receiptImageBase64 ? String(receiptImageBase64).substring(0, 100) + "..." : void 0,
-        receiptImageUrl,
+        receiptImageBase64: storedBase64DataUri,
+        receiptImageUrl: receiptImageUrl || storedBase64DataUri || "",
         userNotes: userNotes ? String(userNotes).trim() : "",
         status: "pending",
         createdAt: Date.now()
       });
-      sendTelegramCardNotification(order, imgBuffer).catch((tErr) => console.warn("Telegram notify error:", tErr));
+      const telegramSent = await sendTelegramCardNotification(order, imgBuffer);
       res.json({
         success: true,
         orderId,
         order,
+        telegramSent,
         message: "\u0631\u0633\u06CC\u062F \u067E\u0631\u062F\u0627\u062E\u062A \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u0627\u0631\u0633\u0627\u0644 \u0634\u062F \u0648 \u062F\u0631 \u0635\u0641 \u062A\u0627\u06CC\u06CC\u062F \u0645\u062F\u06CC\u0631\u06CC\u062A \u0642\u0631\u0627\u0631 \u06AF\u0631\u0641\u062A."
       });
     } catch (err) {
@@ -2798,7 +2912,23 @@ ${statusText}`;
       res.status(500).json({ success: false, message: err?.message || "\u062E\u0637\u0627 \u062F\u0631 \u062B\u0628\u062A \u0641\u06CC\u0634 \u0648\u0627\u0631\u06CC\u0632\u06CC" });
     }
   });
-  app.get("/api/bridge/card-transfer/status/:orderId", (req, res) => {
+  app.post("/api/bridge/admin/card-transfer/resend-telegram", async (req, res) => {
+    try {
+      const { orderId } = req.body;
+      const order = bridgeStore.getCardOrder(orderId);
+      if (!order) {
+        return res.status(404).json({ success: false, message: "\u0633\u0641\u0627\u0631\u0634 \u06CC\u0627\u0641\u062A \u0646\u0634\u062F." });
+      }
+      const sent = await sendTelegramCardNotification(order);
+      res.json({
+        success: sent,
+        message: sent ? "\u0641\u06CC\u0634 \u0648\u0627\u0631\u06CC\u0632\u06CC \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u0628\u0647 \u0631\u0628\u0627\u062A \u062A\u0644\u06AF\u0631\u0627\u0645 \u0627\u0631\u0633\u0627\u0644 \u0634\u062F." : "\u0627\u0631\u0633\u0627\u0644 \u0628\u0647 \u062A\u0644\u06AF\u0631\u0627\u0645 \u0627\u0646\u062C\u0627\u0645 \u0646\u0634\u062F. \u0644\u0637\u0641\u0627\u064B \u062A\u0648\u06A9\u0646 \u0631\u0628\u0627\u062A \u0648 Chat ID \u0631\u0627 \u0628\u0631\u0631\u0633\u06CC \u06A9\u0646\u06CC\u062F."
+      });
+    } catch (err) {
+      res.status(500).json({ success: false, message: err?.message || "\u062E\u0637\u0627 \u062F\u0631 \u0627\u0631\u0633\u0627\u0644 \u0628\u0647 \u062A\u0644\u06AF\u0631\u0627\u0645" });
+    }
+  });
+  app.get(["/api/bridge/card-transfer/status/:orderId", "/api/bridge/payment/card-to-card/status/:orderId"], (req, res) => {
     const order = bridgeStore.getCardOrder(req.params.orderId);
     if (!order) {
       return res.status(404).json({ success: false, message: "\u0631\u0633\u06CC\u062F \u067E\u0631\u062F\u0627\u062E\u062A \u06CC\u0627\u0641\u062A \u0646\u0634\u062F." });
@@ -2892,19 +3022,36 @@ ${statusText}`;
   });
   app.post("/api/bridge/telegram/test", async (req, res) => {
     try {
-      const { botToken: customToken, adminChatId: customChatId } = req.body;
+      const {
+        botToken: customToken,
+        telegramBotToken,
+        adminChatId: customChatId,
+        telegramAdminChatId,
+        bankCardNumber,
+        bankCardOwner,
+        bankName,
+        cardToCardEnabled
+      } = req.body;
       const settings = bridgeStore.getSettings();
-      const botToken = (customToken || settings.telegramBotToken || "").trim();
-      const chatId = (customChatId || settings.telegramAdminChatId || "").trim();
+      const botToken = String(customToken || telegramBotToken || settings.telegramBotToken || "").trim();
+      const chatId = String(customChatId || telegramAdminChatId || settings.telegramAdminChatId || "").trim();
       if (!botToken || !chatId) {
         return res.status(400).json({
           success: false,
           message: "\u062A\u0648\u06A9\u0646 \u0631\u0628\u0627\u062A \u062A\u0644\u06AF\u0631\u0627\u0645 \u0648 Chat ID \u0627\u062F\u0645\u06CC\u0646 \u0631\u0627 \u0648\u0627\u0631\u062F \u0646\u0645\u0627\u06CC\u06CC\u062F."
         });
       }
-      const text = `\u{1F7E2} <b>\u067E\u06CC\u0627\u0645 \u062A\u0633\u062A \u0627\u062A\u0635\u0627\u0644 \u067E\u0646\u0644 \u0645\u06CC\u0627\u0646\u0647 \u062B\u0646\u0627\u06CC\u06CC \u0628\u0647 \u062A\u0644\u06AF\u0631\u0627\u0645</b>
+      bridgeStore.updateSettings({
+        telegramBotToken: botToken,
+        telegramAdminChatId: chatId,
+        ...bankCardNumber !== void 0 ? { bankCardNumber: String(bankCardNumber).trim() } : {},
+        ...bankCardOwner !== void 0 ? { bankCardOwner: String(bankCardOwner).trim() } : {},
+        ...bankName !== void 0 ? { bankName: String(bankName).trim() } : {},
+        ...cardToCardEnabled !== void 0 ? { cardToCardEnabled: Boolean(cardToCardEnabled) } : {}
+      });
+      const text = `\u{1F7E2} <b>\u067E\u06CC\u0627\u0645 \u062A\u0633\u062A \u0627\u062A\u0635\u0627\u0644 \u067E\u0646\u0644 \u0686\u0634\u0645\u06A9 (\u0646\u0633\u062E\u0647 \u06F4) \u0628\u0647 \u062A\u0644\u06AF\u0631\u0627\u0645</b>
 \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
-\u0631\u0628\u0627\u062A \u062A\u0644\u06AF\u0631\u0627\u0645 \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u0645\u062A\u0635\u0644 \u0634\u062F!
+\u2705 \u0631\u0628\u0627\u062A \u062A\u0644\u06AF\u0631\u0627\u0645 \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u0645\u062A\u0635\u0644 \u0648 \u062F\u0631 \u0633\u0631\u0648\u0631 \u0630\u062E\u06CC\u0631\u0647 \u0634\u062F!
 \u0627\u0632 \u0627\u06CC\u0646 \u067E\u0633 \u0647\u0646\u06AF\u0627\u0645\u06CC \u06A9\u0647 \u06A9\u0627\u0631\u0628\u0631 \u062F\u0631 \u0627\u067E\u0644\u06CC\u06A9\u06CC\u0634\u0646 \u0627\u0632 \u0637\u0631\u06CC\u0642 \u06A9\u0627\u0631\u062A \u0628\u0647 \u06A9\u0627\u0631\u062A \u062E\u0631\u06CC\u062F \u06A9\u0646\u062F\u060C \u0639\u06A9\u0633 \u0641\u06CC\u0634 \u0648\u0627\u0631\u06CC\u0632\u06CC \u0648 \u062F\u06A9\u0645\u0647\u200C\u0647\u0627\u06CC \u062A\u0627\u06CC\u06CC\u062F/\u0631\u062F \u0622\u0646\u06CC \u062F\u0631 \u0627\u06CC\u0646 \u0686\u062A \u0627\u0631\u0633\u0627\u0644 \u0645\u06CC\u200C\u0634\u0648\u062F.
 \u23F0 \u0632\u0645\u0627\u0646 \u062A\u0633\u062A: ${(/* @__PURE__ */ new Date()).toLocaleDateString("fa-IR")} ${(/* @__PURE__ */ new Date()).toLocaleTimeString("fa-IR")}`;
       const resp = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
@@ -2918,9 +3065,12 @@ ${statusText}`;
       });
       const data = await resp.json();
       if (data?.ok) {
+        flushPendingCardOrdersToTelegram().catch(() => {
+        });
         return res.json({
           success: true,
-          message: "\u067E\u06CC\u0627\u0645 \u062A\u0633\u062A \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u0628\u0647 \u062A\u0644\u06AF\u0631\u0627\u0645 \u0634\u0645\u0627 \u0627\u0631\u0633\u0627\u0644 \u06AF\u0631\u062F\u06CC\u062F! \u062A\u0644\u06AF\u0631\u0627\u0645 \u062E\u0648\u062F \u0631\u0627 \u0686\u06A9 \u06A9\u0646\u06CC\u062F."
+          settings: bridgeStore.getSettings(),
+          message: "\u067E\u06CC\u0627\u0645 \u062A\u0633\u062A \u0627\u0631\u0633\u0627\u0644 \u0634\u062F \u0648 \u062A\u0648\u06A9\u0646 \u0648 \u0622\u06CC\u062F\u06CC \u062A\u0644\u06AF\u0631\u0627\u0645 \u0628\u0647 \u0635\u0648\u0631\u062A \u062F\u0627\u0626\u0645\u06CC \u0630\u062E\u06CC\u0631\u0647 \u06AF\u0631\u062F\u06CC\u062F!"
         });
       } else {
         return res.status(400).json({
