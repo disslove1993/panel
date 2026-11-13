@@ -31,6 +31,7 @@ import {
   Loader2,
   Smartphone,
   Sparkles,
+  LayoutGrid,
 } from 'lucide-react';
 import { SanaeiClient, SanaeiInbound, SanaeiPanelProfile } from './types/sanaei';
 import {
@@ -65,7 +66,7 @@ const EMPTY_PROFILE_PLACEHOLDER: SanaeiPanelProfile = {
 type ActiveSection = 'inbounds' | 'bridge' | 'clients' | 'servers' | 'manual-connect';
 
 export default function App() {
-  const [isDark, setIsDark] = useState<boolean>(true);
+  const [isDark, setIsDark] = useState<boolean>(false);
   const [profiles, setProfiles] = useState<SanaeiPanelProfile[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
@@ -549,9 +550,9 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <div className="min-h-screen flex flex-col bg-[#F4F7FE] text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       {/* Top Bar Contract: Strictly 3 zones separated by gap-8 */}
-      <header className="sticky top-0 z-30 flex items-center justify-between gap-8 px-6 py-3.5 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+      <header className="sticky top-0 z-30 flex items-center justify-between gap-8 px-6 py-3.5 bg-white dark:bg-slate-900 border-b border-[#E6EDFF] dark:border-slate-800 shadow-[0_2px_15px_-3px_rgba(0,97,255,0.05)]">
         {/* Zone 1: Brand Title, single line */}
         <a
           href="#top"
@@ -559,26 +560,23 @@ export default function App() {
             e.preventDefault();
             setActiveSection('inbounds');
           }}
-          className="text-base font-black tracking-tight text-slate-900 dark:text-slate-100 whitespace-nowrap shrink-0 flex items-center gap-2"
+          className="text-lg font-black tracking-tight text-[#0061FF] dark:text-blue-400 whitespace-nowrap shrink-0 flex items-center gap-2.5"
         >
-          <span className="w-8 h-8 rounded-xl bg-gradient-to-tr from-purple-600 to-sky-500 flex items-center justify-center text-white shadow-md shadow-purple-500/20">
-            <Eye className="w-4 h-4" />
+          <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#0061FF] to-[#3B82F6] flex items-center justify-center text-white shadow-md shadow-blue-500/25">
+            <Eye className="w-5 h-5" />
           </span>
-          <span>پنل چشمک</span>
-          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20 hidden sm:inline-block">
-            Cheshmak v3
-          </span>
+          <span>پنل چشمک · نسخه ۴</span>
         </a>
 
-        {/* Zone 2: 4 concise single-line navigation links */}
+        {/* Zone 2: 5 concise single-line navigation links */}
         <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600 dark:text-slate-400">
           <button
             type="button"
             onClick={() => setActiveSection('inbounds')}
             className={`py-1 transition-colors whitespace-nowrap shrink-0 ${
               activeSection === 'inbounds'
-                ? 'text-slate-900 dark:text-white underline underline-offset-8 decoration-2 decoration-sky-500'
-                : 'hover:text-slate-900 dark:hover:text-slate-200'
+                ? 'text-[#0061FF] dark:text-blue-400 underline underline-offset-8 decoration-2 decoration-[#0061FF] font-bold'
+                : 'hover:text-[#0061FF] dark:hover:text-blue-400'
             }`}
           >
             این‌باندهای پنل
@@ -588,11 +586,11 @@ export default function App() {
             onClick={() => setActiveSection('bridge')}
             className={`py-1 transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 ${
               activeSection === 'bridge'
-                ? 'text-slate-900 dark:text-white underline underline-offset-8 decoration-2 decoration-sky-500 font-semibold'
-                : 'hover:text-slate-900 dark:hover:text-slate-200 text-sky-600 dark:text-sky-400'
+                ? 'text-[#0061FF] dark:text-blue-400 underline underline-offset-8 decoration-2 decoration-[#0061FF] font-bold'
+                : 'hover:text-[#0061FF] dark:hover:text-blue-400 text-[#0061FF] dark:text-blue-400'
             }`}
           >
-            <Sparkles className="w-3.5 h-3.5" />
+            <LayoutGrid className="w-3.5 h-3.5" />
             پل ارتباطی اپلیکیشن (Bridge API)
           </button>
           <button
@@ -600,8 +598,8 @@ export default function App() {
             onClick={() => setActiveSection('manual-connect')}
             className={`py-1 transition-colors whitespace-nowrap shrink-0 ${
               activeSection === 'manual-connect'
-                ? 'text-slate-900 dark:text-white underline underline-offset-8 decoration-2 decoration-sky-500'
-                : 'hover:text-slate-900 dark:hover:text-slate-200'
+                ? 'text-[#0061FF] dark:text-blue-400 underline underline-offset-8 decoration-2 decoration-[#0061FF] font-bold'
+                : 'hover:text-[#0061FF] dark:hover:text-blue-400'
             }`}
           >
             اتصال دستی پنل
@@ -611,8 +609,8 @@ export default function App() {
             onClick={() => setActiveSection('clients')}
             className={`py-1 transition-colors whitespace-nowrap shrink-0 ${
               activeSection === 'clients'
-                ? 'text-slate-900 dark:text-white underline underline-offset-8 decoration-2 decoration-sky-500'
-                : 'hover:text-slate-900 dark:hover:text-slate-200'
+                ? 'text-[#0061FF] dark:text-blue-400 underline underline-offset-8 decoration-2 decoration-[#0061FF] font-bold'
+                : 'hover:text-[#0061FF] dark:hover:text-blue-400'
             }`}
           >
             همه کاربران
@@ -622,8 +620,8 @@ export default function App() {
             onClick={() => setActiveSection('servers')}
             className={`py-1 transition-colors whitespace-nowrap shrink-0 ${
               activeSection === 'servers'
-                ? 'text-slate-900 dark:text-white underline underline-offset-8 decoration-2 decoration-sky-500'
-                : 'hover:text-slate-900 dark:hover:text-slate-200'
+                ? 'text-[#0061FF] dark:text-blue-400 underline underline-offset-8 decoration-2 decoration-[#0061FF] font-bold'
+                : 'hover:text-[#0061FF] dark:hover:text-blue-400'
             }`}
           >
             سرورهای ذخیره شده
@@ -638,7 +636,7 @@ export default function App() {
               setEditingProfile(null);
               setIsConnectModalOpen(true);
             }}
-            className="px-4 py-2 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 rounded-lg transition-colors whitespace-nowrap shrink-0"
+            className="px-4 py-2 text-xs font-bold text-white bg-gradient-to-r from-[#0061FF] to-[#2B7FFF] hover:from-[#0052D6] hover:to-[#1D68E8] rounded-xl shadow-md shadow-blue-500/25 transition-all whitespace-nowrap shrink-0"
           >
             + اتصال پنل ثنایی جدید
           </button>
@@ -647,13 +645,106 @@ export default function App() {
 
       {/* Main Workspace Canvas: Sidebar (260px in RTL) + Main Content Viewport */}
       <div className="flex-1 flex flex-col lg:flex-row">
-        {/* Sidebar */}
-        <aside className="w-full lg:w-64 xl:w-72 shrink-0 bg-white dark:bg-slate-900 border-b lg:border-b-0 lg:border-l border-slate-200 dark:border-slate-800 p-5 flex flex-col justify-between gap-6">
+        {/* Sidebar styled after Edaca reference */}
+        <aside className="w-full lg:w-64 xl:w-72 shrink-0 bg-white dark:bg-slate-900 border-b lg:border-b-0 lg:border-l border-[#E6EDFF] dark:border-slate-800 p-5 flex flex-col justify-between gap-6">
           <div className="space-y-6">
+            {/* Primary Navigation Menu (Edaca Style) */}
+            <div className="space-y-1.5">
+              <div className="text-[11px] font-bold text-slate-400 dark:text-slate-500 px-2 mb-2">
+                منوی مدیریت پنل چشمک (v4.0)
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setActiveSection('inbounds')}
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all ${
+                  activeSection === 'inbounds'
+                    ? 'bg-gradient-to-l from-[#0061FF] to-[#2B7FFF] text-white shadow-md shadow-blue-500/25'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-[#EEF4FF] dark:hover:bg-slate-800/60 hover:text-[#0061FF]'
+                }`}
+              >
+                <span className="flex items-center gap-2.5">
+                  <LayoutGrid className="w-4 h-4" />
+                  <span>داشبورد و این‌باندها</span>
+                </span>
+                <div className="flex items-center gap-1">
+                  <span className="font-mono tabular-nums text-[11px] opacity-85">{stats.totalInbounds}</span>
+                  <ChevronLeft className="w-3.5 h-3.5 opacity-70" />
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveSection('bridge')}
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all ${
+                  activeSection === 'bridge'
+                    ? 'bg-gradient-to-l from-[#0061FF] to-[#2B7FFF] text-white shadow-md shadow-blue-500/25'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-[#EEF4FF] dark:hover:bg-slate-800/60 hover:text-[#0061FF]'
+                }`}
+              >
+                <span className="flex items-center gap-2.5">
+                  <Smartphone className="w-4 h-4" />
+                  <span>پل ارتباطی اپلیکیشن (Bridge)</span>
+                </span>
+                <ChevronLeft className="w-3.5 h-3.5 opacity-70" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveSection('manual-connect')}
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all ${
+                  activeSection === 'manual-connect'
+                    ? 'bg-gradient-to-l from-[#0061FF] to-[#2B7FFF] text-white shadow-md shadow-blue-500/25'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-[#EEF4FF] dark:hover:bg-slate-800/60 hover:text-[#0061FF]'
+                }`}
+              >
+                <span className="flex items-center gap-2.5">
+                  <Globe className="w-4 h-4" />
+                  <span>اتصال دستی پنل ثنایی</span>
+                </span>
+                <ChevronLeft className="w-3.5 h-3.5 opacity-70" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveSection('clients')}
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all ${
+                  activeSection === 'clients'
+                    ? 'bg-gradient-to-l from-[#0061FF] to-[#2B7FFF] text-white shadow-md shadow-blue-500/25'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-[#EEF4FF] dark:hover:bg-slate-800/60 hover:text-[#0061FF]'
+                }`}
+              >
+                <span className="flex items-center gap-2.5">
+                  <Users className="w-4 h-4" />
+                  <span>بانک کاربران همه این‌باندها</span>
+                </span>
+                <div className="flex items-center gap-1">
+                  <span className="font-mono tabular-nums text-[11px] opacity-85">{stats.totalClients}</span>
+                  <ChevronLeft className="w-3.5 h-3.5 opacity-70" />
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveSection('servers')}
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all ${
+                  activeSection === 'servers'
+                    ? 'bg-gradient-to-l from-[#0061FF] to-[#2B7FFF] text-white shadow-md shadow-blue-500/25'
+                    : 'text-slate-600 dark:text-slate-300 hover:bg-[#EEF4FF] dark:hover:bg-slate-800/60 hover:text-[#0061FF]'
+                }`}
+              >
+                <span className="flex items-center gap-2.5">
+                  <Server className="w-4 h-4" />
+                  <span>سرورهای متصل ({profiles.length})</span>
+                </span>
+                <ChevronLeft className="w-3.5 h-3.5 opacity-70" />
+              </button>
+            </div>
+
             {/* Active Server Selector List */}
-            <div>
+            <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
                   پنل‌های ثنایی متصل ({profiles.length})
                 </span>
                 <button
@@ -662,7 +753,7 @@ export default function App() {
                     setEditingProfile(null);
                     setIsConnectModalOpen(true);
                   }}
-                  className="text-xs font-medium text-sky-600 dark:text-sky-400 hover:underline flex items-center gap-1 whitespace-nowrap shrink-0"
+                  className="text-xs font-bold text-[#0061FF] dark:text-blue-400 hover:underline flex items-center gap-1 whitespace-nowrap shrink-0"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   افزودن پنل
@@ -671,7 +762,7 @@ export default function App() {
 
               <div className="space-y-2">
                 {profiles.length === 0 ? (
-                  <div className="p-4 rounded-xl border border-dashed border-slate-300 dark:border-slate-800 text-center space-y-2">
+                  <div className="p-4 rounded-2xl bg-[#F8FAFF] dark:bg-slate-950/50 border border-dashed border-[#CBD9FF] dark:border-slate-800 text-center space-y-2.5">
                     <p className="text-xs text-slate-500 dark:text-slate-400">
                       هنوز هیچ پنل ثنایی ثبت نشده است
                     </p>
@@ -681,7 +772,7 @@ export default function App() {
                         setEditingProfile(null);
                         setIsConnectModalOpen(true);
                       }}
-                      className="w-full py-1.5 px-3 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-semibold transition-colors"
+                      className="w-full py-2 px-3 bg-gradient-to-r from-[#0061FF] to-[#2B7FFF] hover:from-[#0052D6] hover:to-[#1D68E8] text-white rounded-xl text-xs font-bold shadow-sm shadow-blue-500/20 transition-all"
                     >
                       + اتصال اولین پنل ثنایی
                     </button>
@@ -698,15 +789,15 @@ export default function App() {
                             setExpandedInboundIds([prof.inbounds[0].id]);
                           }
                         }}
-                        className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                        className={`p-3 rounded-xl border cursor-pointer transition-all ${
                           isSelected
-                            ? 'bg-sky-50/70 dark:bg-sky-950/30 border-sky-500/60 dark:border-sky-500/50 text-slate-900 dark:text-white'
-                            : 'bg-slate-50/50 dark:bg-slate-950/40 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-700'
+                            ? 'bg-[#EEF4FF] dark:bg-blue-950/40 border-[#0061FF]/40 dark:border-blue-500/50 text-slate-900 dark:text-white'
+                            : 'bg-slate-50/70 dark:bg-slate-950/40 border-slate-200/80 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-blue-300 dark:hover:border-slate-700'
                         }`}
                       >
                         <div className="flex items-center justify-between gap-2 mb-1">
                           <span className="text-xs font-bold truncate">{prof.name}</span>
-                          <span className="text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400 shrink-0">
+                          <span className="text-[11px] font-mono tabular-nums text-[#0061FF] dark:text-blue-400 font-bold shrink-0">
                             {prof.inbounds.length} این‌باند
                           </span>
                         </div>
@@ -722,101 +813,16 @@ export default function App() {
                 )}
               </div>
             </div>
-
-            {/* Mobile/Quick Navigation inside Sidebar */}
-            <div className="space-y-1 pt-4 border-t border-slate-200 dark:border-slate-800">
-              <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2">
-                بخش‌های مدیریتی
-              </div>
-              <button
-                type="button"
-                onClick={() => setActiveSection('inbounds')}
-                className={`w-full flex items-center justify-between px-3 py-2 text-xs font-medium rounded-lg transition-colors ${
-                  activeSection === 'inbounds'
-                    ? 'bg-slate-900 text-white dark:bg-slate-800 dark:text-white'
-                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50'
-                }`}
-              >
-                <span className="flex items-center gap-2.5">
-                  <Network className="w-4 h-4" />
-                  لیست این‌باندهای پنل
-                </span>
-                <span className="font-mono tabular-nums">{stats.totalInbounds}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveSection('bridge')}
-                className={`w-full flex items-center justify-between px-3 py-2 text-xs font-semibold rounded-lg transition-colors ${
-                  activeSection === 'bridge'
-                    ? 'bg-sky-600 text-white shadow-sm'
-                    : 'text-sky-600 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-950/40'
-                }`}
-              >
-                <span className="flex items-center gap-2.5">
-                  <Smartphone className="w-4 h-4" />
-                  پل ارتباطی اپلیکیشن (Bridge)
-                </span>
-                <span className="px-1.5 py-0.5 text-[10px] bg-sky-500/20 text-sky-400 rounded">API</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveSection('manual-connect')}
-                className={`w-full flex items-center justify-between px-3 py-2 text-xs font-medium rounded-lg transition-colors ${
-                  activeSection === 'manual-connect'
-                    ? 'bg-slate-900 text-white dark:bg-slate-800 dark:text-white'
-                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50'
-                }`}
-              >
-                <span className="flex items-center gap-2.5">
-                  <Globe className="w-4 h-4" />
-                  فرم اتصال دستی به ثنایی
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveSection('clients')}
-                className={`w-full flex items-center justify-between px-3 py-2 text-xs font-medium rounded-lg transition-colors ${
-                  activeSection === 'clients'
-                    ? 'bg-slate-900 text-white dark:bg-slate-800 dark:text-white'
-                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50'
-                }`}
-              >
-                <span className="flex items-center gap-2.5">
-                  <Users className="w-4 h-4" />
-                  بانک کاربران همه این‌باندها
-                </span>
-                <span className="font-mono tabular-nums">{stats.totalClients}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveSection('servers')}
-                className={`w-full flex items-center justify-between px-3 py-2 text-xs font-medium rounded-lg transition-colors ${
-                  activeSection === 'servers'
-                    ? 'bg-slate-900 text-white dark:bg-slate-800 dark:text-white'
-                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/50'
-                }`}
-              >
-                <span className="flex items-center gap-2.5">
-                  <Server className="w-4 h-4" />
-                  مدیریت سرورهای متصل
-                </span>
-                <span className="font-mono tabular-nums">{profiles.length}</span>
-              </button>
-            </div>
           </div>
 
           {/* Sidebar Footer: Theme Switch & Connection Guide */}
-          <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-3">
+          <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-xs text-slate-500 dark:text-slate-400">حالت نمایش پنل</span>
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">حالت نمایش پنل</span>
               <button
                 type="button"
                 onClick={() => setIsDark(!isDark)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-colors whitespace-nowrap shrink-0"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-[#0061FF] dark:text-blue-300 bg-[#EEF4FF] dark:bg-slate-800 hover:bg-blue-100 dark:hover:bg-slate-700 rounded-xl transition-colors whitespace-nowrap shrink-0"
               >
                 {isDark ? (
                   <>
@@ -825,14 +831,14 @@ export default function App() {
                   </>
                 ) : (
                   <>
-                    <Moon className="w-3.5 h-3.5 text-slate-600" />
+                    <Moon className="w-3.5 h-3.5 text-[#0061FF]" />
                     حالت تیره
                   </>
                 )}
               </button>
             </div>
             <p className="text-[11px] text-slate-400 dark:text-slate-500 leading-relaxed">
-              پشتیبانی از تمامی نسخه‌های پنل ثنایی (MHSanaei 3x-ui و X-UI) از طریق پروکسی سرور داخلی بدون محدودیت CORS.
+              پنل چشمک نسخه ۴.۰ — پشتیبانی کامل از پنل‌های ثنایی (3X-UI و X-UI) و پل ارتباطی اپلیکیشن.
             </p>
           </div>
         </aside>
@@ -842,10 +848,10 @@ export default function App() {
           {/* Notification Banner */}
           {toast && (
             <div
-              className={`p-3.5 rounded-lg border flex items-center justify-between text-xs font-medium ${
+              className={`p-3.5 rounded-xl border flex items-center justify-between text-xs font-medium ${
                 toast.type === 'error'
                   ? 'bg-red-50 dark:bg-red-950/50 border-red-200 dark:border-red-900 text-red-700 dark:text-red-300'
-                  : 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300'
+                  : 'bg-blue-50 dark:bg-blue-950/50 border-blue-200 dark:border-blue-900 text-[#0061FF] dark:text-blue-300'
               }`}
             >
               <span>{toast.text}</span>
@@ -859,11 +865,14 @@ export default function App() {
             </div>
           )}
 
-          {/* Active Server Context Header Bar */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 border-b border-slate-200 dark:border-slate-800">
+          {/* Active Server Context Header Bar (Matching Edaca Header Greeting) */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2">
             <div>
-              <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mb-1">
-                <span>سرور فعال</span>
+              <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-slate-100">
+                {activeProfile.name}
+              </h1>
+              <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mt-1">
+                <span>پنل چشمک نسخه ۴.۰</span>
                 <span aria-hidden="true">·</span>
                 <span className="font-mono" dir="ltr">
                   {activeProfile.panelUrl}
@@ -874,12 +883,9 @@ export default function App() {
                     ? 'متصل به API زنده پنل ثنایی'
                     : activeProfile.mode === 'json'
                     ? 'بارگذاری شده از JSON دستی'
-                    : 'سرور نمونه آماده (جهت تست محیط)'}
+                    : 'سرور نمونه آماده'}
                 </span>
               </div>
-              <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100">
-                {activeProfile.name}
-              </h1>
             </div>
 
             <div className="flex flex-wrap items-center gap-2.5">
@@ -887,9 +893,9 @@ export default function App() {
                 type="button"
                 onClick={handleRefreshActivePanel}
                 disabled={isSyncing}
-                className="px-3.5 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg transition-colors flex items-center gap-2 whitespace-nowrap shrink-0"
+                className="px-3.5 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-[#E6EDFF] dark:border-slate-800 hover:bg-[#EEF4FF] dark:hover:bg-slate-800 rounded-xl transition-colors flex items-center gap-2 whitespace-nowrap shrink-0 shadow-2xs"
               >
-                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-sky-500' : ''}`} />
+                <RefreshCw className={`w-3.5 h-3.5 text-[#0061FF] ${isSyncing ? 'animate-spin' : ''}`} />
                 {isSyncing ? 'در حال دریافت از پنل...' : 'بروزرسانی این‌باندها'}
               </button>
 
@@ -899,81 +905,125 @@ export default function App() {
                   setEditingProfile(activeProfile);
                   setIsConnectModalOpen(true);
                 }}
-                className="px-3.5 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg transition-colors flex items-center gap-2 whitespace-nowrap shrink-0"
+                className="px-3.5 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-[#E6EDFF] dark:border-slate-800 hover:bg-[#EEF4FF] dark:hover:bg-slate-800 rounded-xl transition-colors flex items-center gap-2 whitespace-nowrap shrink-0 shadow-2xs"
               >
-                <Edit3 className="w-3.5 h-3.5" />
+                <Edit3 className="w-3.5 h-3.5 text-[#0061FF]" />
                 ویرایش اطلاعات اتصال
               </button>
 
               <button
                 type="button"
                 onClick={() => setActiveSection('manual-connect')}
-                className="px-3.5 py-2 text-xs font-semibold text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-900/60 hover:bg-sky-100 dark:hover:bg-sky-950/70 rounded-lg transition-colors whitespace-nowrap shrink-0"
+                className="px-3.5 py-2 text-xs font-bold text-[#0061FF] dark:text-blue-400 bg-[#EEF4FF] dark:bg-blue-950/40 border border-[#CFE0FF] dark:border-blue-900/60 hover:bg-blue-100 dark:hover:bg-blue-950/70 rounded-xl transition-colors whitespace-nowrap shrink-0"
               >
                 ورود دستی مشخصات پنل ثنایی
               </button>
             </div>
           </div>
 
-          {/* 4-Column KPI Summary Strip */}
-          <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl divide-y sm:divide-y-0 sm:divide-x sm:divide-x-reverse divide-slate-200 dark:divide-slate-800">
-            <div className="p-5">
-              <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-2">
-                <span>کل این‌باندهای موجود در پنل</span>
-                <Network className="w-4 h-4 text-slate-400" />
+          {/* 4-Column KPI Summary Strip (Styled directly after Edaca Top Cards) */}
+          <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            {/* Card 1: Inbounds */}
+            <div className="bg-white dark:bg-slate-900 border border-[#E6EDFF] dark:border-slate-800 rounded-2xl p-4 shadow-[0_4px_20px_-4px_rgba(0,97,255,0.06)]">
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#0061FF] to-[#3B82F6] text-white flex items-center justify-center shadow-md shadow-blue-500/25 shrink-0">
+                  <Network className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">کل این‌باندهای پنل</div>
+                  <div className="text-2xl font-extrabold font-mono tabular-nums text-slate-900 dark:text-white mt-0.5">
+                    {stats.totalInbounds}
+                  </div>
+                </div>
               </div>
-              <div className="text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-slate-100">
-                {stats.totalInbounds}
-              </div>
-              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                <span>{stats.activeInbounds} این‌باند فعال</span>
-                <span className="mx-1.5" aria-hidden="true">·</span>
-                <span>{stats.totalInbounds - stats.activeInbounds} غیرفعال</span>
-              </div>
-            </div>
-
-            <div className="p-5">
-              <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-2">
-                <span>مجموع کاربران (Clients)</span>
-                <Users className="w-4 h-4 text-slate-400" />
-              </div>
-              <div className="text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-slate-100">
-                {stats.totalClients}
-              </div>
-              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                <span>{stats.enabledClients} کاربر فعال</span>
-                <span className="mx-1.5" aria-hidden="true">·</span>
-                <span>{activeProfile.onlineEmails.length} آنلاین</span>
+              <div className="mt-3.5 pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+                <div>
+                  <span className="text-[#0061FF] dark:text-blue-400 font-semibold">فعال: </span>
+                  <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{stats.activeInbounds}</span>
+                </div>
+                <span className="text-slate-200 dark:text-slate-700">|</span>
+                <div>
+                  <span className="text-[#0061FF] dark:text-blue-400 font-semibold">غیرفعال: </span>
+                  <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{stats.totalInbounds - stats.activeInbounds}</span>
+                </div>
               </div>
             </div>
 
-            <div className="p-5">
-              <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-2">
-                <span>کل ترافیک مصرفی این‌باندها</span>
-                <HardDrive className="w-4 h-4 text-slate-400" />
+            {/* Card 2: Clients */}
+            <div className="bg-white dark:bg-slate-900 border border-[#E6EDFF] dark:border-slate-800 rounded-2xl p-4 shadow-[0_4px_20px_-4px_rgba(0,97,255,0.06)]">
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#0061FF] to-[#3B82F6] text-white flex items-center justify-center shadow-md shadow-blue-500/25 shrink-0">
+                  <UserPlus className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">مجموع کاربران (Clients)</div>
+                  <div className="text-2xl font-extrabold font-mono tabular-nums text-slate-900 dark:text-white mt-0.5">
+                    {stats.totalClients}
+                  </div>
+                </div>
               </div>
-              <div className="text-2xl font-bold font-mono tabular-nums text-slate-900 dark:text-slate-100" dir="ltr">
-                {formatBytes(stats.totalTraffic)}
-              </div>
-              <div className="mt-1 text-xs font-mono tabular-nums text-slate-500 dark:text-slate-400" dir="ltr">
-                <span>↓ {formatBytes(stats.totalDown)}</span>
-                <span className="mx-1.5" aria-hidden="true">·</span>
-                <span>↑ {formatBytes(stats.totalUp)}</span>
+              <div className="mt-3.5 pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+                <div>
+                  <span className="text-[#0061FF] dark:text-blue-400 font-semibold">فعال: </span>
+                  <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{stats.enabledClients}</span>
+                </div>
+                <span className="text-slate-200 dark:text-slate-700">|</span>
+                <div>
+                  <span className="text-[#0061FF] dark:text-blue-400 font-semibold">آنلاین: </span>
+                  <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{activeProfile.onlineEmails.length}</span>
+                </div>
               </div>
             </div>
 
-            <div className="p-5">
-              <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-2">
-                <span>میزبان و وضعیت هسته Xray</span>
-                <ShieldCheck className="w-4 h-4 text-emerald-500" />
+            {/* Card 3: Traffic */}
+            <div className="bg-white dark:bg-slate-900 border border-[#E6EDFF] dark:border-slate-800 rounded-2xl p-4 shadow-[0_4px_20px_-4px_rgba(0,97,255,0.06)]">
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#0061FF] to-[#3B82F6] text-white flex items-center justify-center shadow-md shadow-blue-500/25 shrink-0">
+                  <HardDrive className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">کل ترافیک مصرفی</div>
+                  <div className="text-xl font-extrabold font-mono tabular-nums text-slate-900 dark:text-white mt-0.5" dir="ltr">
+                    {formatBytes(stats.totalTraffic)}
+                  </div>
+                </div>
               </div>
-              <div className="text-base font-bold font-mono text-slate-900 dark:text-slate-100 truncate" dir="ltr">
-                {activeProfile.hostname}
+              <div className="mt-3.5 pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs font-mono" dir="ltr">
+                <div>
+                  <span className="text-[#0061FF] dark:text-blue-400 font-sans font-semibold">دانلود: </span>
+                  <span className="font-bold text-slate-800 dark:text-slate-200">{formatBytes(stats.totalDown)}</span>
+                </div>
+                <span className="text-slate-200 dark:text-slate-700">|</span>
+                <div>
+                  <span className="text-[#0061FF] dark:text-blue-400 font-sans font-semibold">آپلود: </span>
+                  <span className="font-bold text-slate-800 dark:text-slate-200">{formatBytes(stats.totalUp)}</span>
+                </div>
               </div>
-              <div className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
-                <span>کاربر پنل: {activeProfile.username}</span>
-                <span className="mx-1.5" aria-hidden="true">·</span>
-                <span>پورت‌های باز: {stats.activeInbounds}</span>
+            </div>
+
+            {/* Card 4: Server Core */}
+            <div className="bg-white dark:bg-slate-900 border border-[#E6EDFF] dark:border-slate-800 rounded-2xl p-4 shadow-[0_4px_20px_-4px_rgba(0,97,255,0.06)]">
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#0061FF] to-[#3B82F6] text-white flex items-center justify-center shadow-md shadow-blue-500/25 shrink-0">
+                  <ShieldCheck className="w-6 h-6" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">هسته سرور ثنایی</div>
+                  <div className="text-base font-extrabold font-mono text-slate-900 dark:text-white truncate mt-0.5" dir="ltr">
+                    {activeProfile.hostname}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-3.5 pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+                <div>
+                  <span className="text-[#0061FF] dark:text-blue-400 font-semibold">ادمین: </span>
+                  <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{activeProfile.username}</span>
+                </div>
+                <span className="text-slate-200 dark:text-slate-700">|</span>
+                <div>
+                  <span className="text-[#0061FF] dark:text-blue-400 font-semibold">نسخه: </span>
+                  <span className="font-mono font-bold text-slate-800 dark:text-slate-200">v4.0</span>
+                </div>
               </div>
             </div>
           </section>

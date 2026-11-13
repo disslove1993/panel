@@ -470,9 +470,9 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          welcomeTokens: Number(welcomeTokensInput) || 1000,
-          freeTrialTrafficGB: Number(freeTrialTrafficGBInput) || 1,
-          freeTrialDays: Number(freeTrialDaysInput) || 3,
+          welcomeTokens: welcomeTokensInput !== '' && !isNaN(Number(welcomeTokensInput)) ? Math.max(0, Number(welcomeTokensInput)) : 0,
+          freeTrialTrafficGB: freeTrialTrafficGBInput !== '' && !isNaN(Number(freeTrialTrafficGBInput)) ? Math.max(0, Number(freeTrialTrafficGBInput)) : 1,
+          freeTrialDays: freeTrialDaysInput !== '' && !isNaN(Number(freeTrialDaysInput)) ? Math.max(1, Number(freeTrialDaysInput)) : 3,
         }),
       });
       const data = await safeParseJson(res);
@@ -535,8 +535,8 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
       name: p.name,
       periodDays: p.periodDays,
       trafficGB: p.trafficGB,
-      priceTokens: p.priceTokens,
-      priceTomans: p.priceTomans || (p.priceTokens * 85),
+      priceTokens: p.priceTokens !== undefined ? p.priceTokens : 0,
+      priceTomans: p.priceTomans !== undefined ? p.priceTomans : 0,
       inboundId: p.inboundId || servers[0]?.id || 4,
       isPopular: !!p.isPopular,
       description: p.description || '',
@@ -549,13 +549,22 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
       alert('لطفاً عنوان اشتراک را وارد کنید.');
       return;
     }
+    const parsedPriceTokens =
+      planForm.priceTokens !== '' && planForm.priceTokens !== undefined && !isNaN(Number(planForm.priceTokens))
+        ? Math.max(0, Number(planForm.priceTokens))
+        : 0;
+    const parsedPriceTomans =
+      planForm.priceTomans !== '' && planForm.priceTomans !== undefined && !isNaN(Number(planForm.priceTomans))
+        ? Math.max(0, Number(planForm.priceTomans))
+        : 0;
+
     const newPlanObj: BridgePlan = {
       id: editingPlan ? editingPlan.id : (planForm.id || `plan_${Date.now()}`),
       name: String(planForm.name).trim(),
-      periodDays: Number(planForm.periodDays) || 30,
-      trafficGB: Number(planForm.trafficGB) || 10,
-      priceTokens: Number(planForm.priceTokens) || 1000,
-      priceTomans: Number(planForm.priceTomans) || 85000,
+      periodDays: Math.max(1, Number(planForm.periodDays) || 30),
+      trafficGB: Math.max(0.1, Number(planForm.trafficGB) || 1),
+      priceTokens: parsedPriceTokens,
+      priceTomans: parsedPriceTomans,
       inboundId: Number(planForm.inboundId) || 4,
       isPopular: Boolean(planForm.isPopular),
       description: String(planForm.description || ''),
@@ -918,33 +927,35 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
 
   return (
     <div className="space-y-6">
-      {/* Top Banner / Hero */}
-      <div className="p-6 bg-gradient-to-r from-sky-900/40 via-slate-900 to-indigo-950/40 border border-sky-500/30 rounded-2xl relative overflow-hidden">
+      {/* Top Banner / Hero (Edaca Royal Blue & Crisp White Style) */}
+      <div className="p-6 bg-white dark:bg-slate-900 border border-[#E6EDFF] dark:border-slate-800 rounded-2xl shadow-[0_4px_20px_-4px_rgba(0,97,255,0.06)] relative overflow-hidden">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-xs font-semibold text-sky-400">
-              <Eye className="w-4 h-4 text-emerald-400 animate-pulse" />
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 text-xs font-bold text-[#0061FF] dark:text-blue-400">
+              <span className="w-7 h-7 rounded-lg bg-[#EEF4FF] dark:bg-blue-950/60 flex items-center justify-center text-[#0061FF] dark:text-blue-400">
+                <Eye className="w-4 h-4" />
+              </span>
               <span>پنل چشمک (Cheshmak Panel) · مدیریت یکپارچه ثنایی و پل ارتباطی اپلیکیشن</span>
             </div>
-            <h1 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-3">
+            <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white flex items-center gap-3">
               <span>مدیریت پیشرفته اشتراک‌ها، حجم و درگاه‌های پرداخت</span>
-              <span className="text-xs px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono">
-                نسخه اختصاصی ۳.۰
+              <span className="text-xs px-2.5 py-1 rounded-lg bg-[#EEF4FF] dark:bg-blue-950/60 text-[#0061FF] dark:text-blue-400 border border-[#CFE0FF] dark:border-blue-800 font-mono">
+                نسخه ۴.۰
               </span>
             </h1>
-            <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
+            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-2xl leading-relaxed">
               صدور خودکار اشتراک‌های VLESS، مدیریت هدیه خوش‌آمدگویی و ترافیک تست، اتصال امن به درگاه زیبال، فیش‌های کارت‌به‌کارت با ربات تلگرام و سوییچ لحظه‌ای این‌باندها.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 bg-slate-950/60 p-2 rounded-2xl border border-slate-800">
+          <div className="flex flex-wrap items-center gap-1.5 bg-[#F4F7FE] dark:bg-slate-950 p-1.5 rounded-2xl border border-[#E6EDFF] dark:border-slate-800">
             <button
               type="button"
               onClick={() => setActiveTab('dashboard')}
-              className={`px-3.5 py-2 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
+              className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
                 activeTab === 'dashboard'
-                  ? 'bg-sky-500 text-white shadow-lg shadow-sky-500/25'
-                  : 'text-slate-300 hover:text-white hover:bg-white/10'
+                  ? 'bg-gradient-to-l from-[#0061FF] to-[#2B7FFF] text-white shadow-md shadow-blue-500/25'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-[#0061FF] hover:bg-white dark:hover:bg-slate-900'
               }`}
             >
               <PieChart className="w-4 h-4" />
@@ -953,10 +964,10 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
             <button
               type="button"
               onClick={() => setActiveTab('plans')}
-              className={`px-3.5 py-2 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
+              className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
                 activeTab === 'plans'
-                  ? 'bg-sky-500 text-white shadow-lg shadow-sky-500/25'
-                  : 'text-slate-300 hover:text-white hover:bg-white/10'
+                  ? 'bg-gradient-to-l from-[#0061FF] to-[#2B7FFF] text-white shadow-md shadow-blue-500/25'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-[#0061FF] hover:bg-white dark:hover:bg-slate-900'
               }`}
             >
               <Sliders className="w-4 h-4" />
@@ -965,10 +976,10 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
             <button
               type="button"
               onClick={() => setActiveTab('users')}
-              className={`px-3.5 py-2 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
+              className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
                 activeTab === 'users'
-                  ? 'bg-sky-500 text-white shadow-lg shadow-sky-500/25'
-                  : 'text-slate-300 hover:text-white hover:bg-white/10'
+                  ? 'bg-gradient-to-l from-[#0061FF] to-[#2B7FFF] text-white shadow-md shadow-blue-500/25'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-[#0061FF] hover:bg-white dark:hover:bg-slate-900'
               }`}
             >
               <Users className="w-4 h-4" />
@@ -977,10 +988,10 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
             <button
               type="button"
               onClick={() => setActiveTab('wallet')}
-              className={`px-3.5 py-2 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
+              className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
                 activeTab === 'wallet'
-                  ? 'bg-sky-500 text-white shadow-lg shadow-sky-500/25'
-                  : 'text-slate-300 hover:text-white hover:bg-white/10'
+                  ? 'bg-gradient-to-l from-[#0061FF] to-[#2B7FFF] text-white shadow-md shadow-blue-500/25'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-[#0061FF] hover:bg-white dark:hover:bg-slate-900'
               }`}
             >
               <CreditCard className="w-4 h-4" />
@@ -989,10 +1000,10 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
             <button
               type="button"
               onClick={() => setActiveTab('docs')}
-              className={`px-3.5 py-2 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
+              className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
                 activeTab === 'docs'
-                  ? 'bg-sky-500 text-white shadow-lg shadow-sky-500/25'
-                  : 'text-slate-300 hover:text-white hover:bg-white/10'
+                  ? 'bg-gradient-to-l from-[#0061FF] to-[#2B7FFF] text-white shadow-md shadow-blue-500/25'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-[#0061FF] hover:bg-white dark:hover:bg-slate-900'
               }`}
             >
               <BookOpen className="w-4 h-4" />
@@ -1001,10 +1012,10 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
             <button
               type="button"
               onClick={() => setActiveTab('vps')}
-              className={`px-3.5 py-2 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
+              className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
                 activeTab === 'vps'
-                  ? 'bg-sky-500 text-white shadow-lg shadow-sky-500/25'
-                  : 'text-slate-300 hover:text-white hover:bg-white/10'
+                  ? 'bg-gradient-to-l from-[#0061FF] to-[#2B7FFF] text-white shadow-md shadow-blue-500/25'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-[#0061FF] hover:bg-white dark:hover:bg-slate-900'
               }`}
             >
               <Terminal className="w-4 h-4" />
@@ -1013,10 +1024,10 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
             <button
               type="button"
               onClick={() => setActiveTab('simulator')}
-              className={`px-3.5 py-2 text-xs font-semibold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
+              className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
                 activeTab === 'simulator'
-                  ? 'bg-sky-500 text-white shadow-lg shadow-sky-500/25'
-                  : 'text-slate-300 hover:text-white hover:bg-white/10'
+                  ? 'bg-gradient-to-l from-[#0061FF] to-[#2B7FFF] text-white shadow-md shadow-blue-500/25'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-[#0061FF] hover:bg-white dark:hover:bg-slate-900'
               }`}
             >
               <Smartphone className="w-4 h-4" />
@@ -1057,93 +1068,135 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
         ];
         const maxDayTraffic = Math.max(...recentDays.map((d: any) => d.trafficGB || 1), 1);
 
-        const onlineCount = overviewStats?.onlineUsersCount || (users.filter((u) => u.subscription?.status === 'active').length > 0 ? users.filter((u) => u.subscription?.status === 'active').length : 1);
+        const onlineCount = overviewStats?.onlineUsersCount || (users.filter((u) => u.subscription?.status === 'active').length > 0 ? users.filter((u) => u.subscription?.status === 'active').length : 0);
+        const activeSubCount = users.filter((u) => u.subscription?.status === 'active').length;
 
         return (
           <div className="space-y-6">
-            {/* Top Stat Cards */}
+            {/* Top Stat Cards (Edaca Reference Style: Glossy Royal Blue Icon Box + Bottom Split Stats) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {/* Online Users Card with Live Green Pulse */}
-              <div className="p-5 bg-gradient-to-br from-slate-900 to-emerald-950/40 border border-emerald-500/30 rounded-2xl relative overflow-hidden shadow-lg">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <span className="relative flex h-3 w-3">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
-                    </span>
-                    <span className="text-xs font-bold text-emerald-400">کاربران آنلاین زنده</span>
+              {/* Card 1: Online Users */}
+              <div className="bg-white dark:bg-slate-900 border border-[#E6EDFF] dark:border-slate-800 rounded-2xl p-4 shadow-[0_4px_20px_-4px_rgba(0,97,255,0.06)]">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#0061FF] to-[#3B82F6] text-white flex items-center justify-center shadow-md shadow-blue-500/25 shrink-0">
+                    <Radio className="w-6 h-6" />
                   </div>
-                  <Radio className="w-4 h-4 text-emerald-400" />
+                  <div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">کاربران آنلاین زنده</div>
+                    <div className="text-2xl font-extrabold font-mono tabular-nums text-slate-900 dark:text-white mt-0.5">
+                      {onlineCount}
+                    </div>
+                  </div>
                 </div>
-                <div className="text-3xl font-extrabold font-mono text-white flex items-baseline gap-2">
-                  <span>{onlineCount}</span>
-                  <span className="text-xs text-emerald-300 font-normal">کلاینت متصل</span>
+                <div className="mt-3.5 pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+                  <div>
+                    <span className="text-[#0061FF] dark:text-blue-400 font-semibold">متصل: </span>
+                    <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{onlineCount}</span>
+                  </div>
+                  <span className="text-slate-200 dark:text-slate-700">|</span>
+                  <div>
+                    <span className="text-[#0061FF] dark:text-blue-400 font-semibold">سرورها: </span>
+                    <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{servers.length}</span>
+                  </div>
                 </div>
-                <p className="text-[11px] text-slate-400 mt-2">
-                  در حال تبادل ترافیک فعال با هسته Xray ثنایی
-                </p>
               </div>
 
-              {/* Total Users */}
-              <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl shadow-lg">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-bold text-slate-400">بانک کاربران اپلیکیشن</span>
-                  <Users className="w-4 h-4 text-sky-400" />
+              {/* Card 2: Total Users */}
+              <div className="bg-white dark:bg-slate-900 border border-[#E6EDFF] dark:border-slate-800 rounded-2xl p-4 shadow-[0_4px_20px_-4px_rgba(0,97,255,0.06)]">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#0061FF] to-[#3B82F6] text-white flex items-center justify-center shadow-md shadow-blue-500/25 shrink-0">
+                    <Users className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">بانک کاربران اپلیکیشن</div>
+                    <div className="text-2xl font-extrabold font-mono tabular-nums text-slate-900 dark:text-white mt-0.5">
+                      {users.length}
+                    </div>
+                  </div>
                 </div>
-                <div className="text-3xl font-extrabold font-mono text-white flex items-baseline gap-2">
-                  <span>{users.length}</span>
-                  <span className="text-xs text-slate-400 font-normal">کاربر ثبت‌شده</span>
+                <div className="mt-3.5 pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+                  <div>
+                    <span className="text-[#0061FF] dark:text-blue-400 font-semibold">فعال: </span>
+                    <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{activeSubCount}</span>
+                  </div>
+                  <span className="text-slate-200 dark:text-slate-700">|</span>
+                  <div>
+                    <span className="text-[#0061FF] dark:text-blue-400 font-semibold">جدید: </span>
+                    <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{Math.max(0, users.length - activeSubCount)}</span>
+                  </div>
                 </div>
-                <p className="text-[11px] text-slate-400 mt-2">
-                  ثبت با ایمیل یا شناسه یکتا در پایگاه داده
-                </p>
               </div>
 
-              {/* Active Subscriptions */}
-              <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl shadow-lg">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-bold text-slate-400">اشتراک‌های فعال ثنایی</span>
-                  <Zap className="w-4 h-4 text-amber-400" />
+              {/* Card 3: Active Subscriptions */}
+              <div className="bg-white dark:bg-slate-900 border border-[#E6EDFF] dark:border-slate-800 rounded-2xl p-4 shadow-[0_4px_20px_-4px_rgba(0,97,255,0.06)]">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#0061FF] to-[#3B82F6] text-white flex items-center justify-center shadow-md shadow-blue-500/25 shrink-0">
+                    <Zap className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">اشتراک‌های فعال ثنایی</div>
+                    <div className="text-2xl font-extrabold font-mono tabular-nums text-slate-900 dark:text-white mt-0.5">
+                      {activeSubCount}
+                    </div>
+                  </div>
                 </div>
-                <div className="text-3xl font-extrabold font-mono text-amber-400 flex items-baseline gap-2">
-                  <span>{users.filter((u) => u.subscription?.status === 'active').length}</span>
-                  <span className="text-xs text-slate-400 font-normal">اکانت فعال</span>
+                <div className="mt-3.5 pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+                  <div>
+                    <span className="text-[#0061FF] dark:text-blue-400 font-semibold">پلن‌ها: </span>
+                    <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{plans.length}</span>
+                  </div>
+                  <span className="text-slate-200 dark:text-slate-700">|</span>
+                  <div>
+                    <span className="text-[#0061FF] dark:text-blue-400 font-semibold">هدیه: </span>
+                    <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{welcomeTokensInput}</span>
+                  </div>
                 </div>
-                <p className="text-[11px] text-slate-400 mt-2">
-                  دارای کانفیگ اختصاصی و حجم معتبر
-                </p>
               </div>
 
-              {/* Total Bandwidth */}
-              <div className="p-5 bg-slate-900 border border-slate-800 rounded-2xl shadow-lg">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-bold text-slate-400">کل حجم مصرفی</span>
-                  <Activity className="w-4 h-4 text-purple-400" />
+              {/* Card 4: Total Bandwidth */}
+              <div className="bg-white dark:bg-slate-900 border border-[#E6EDFF] dark:border-slate-800 rounded-2xl p-4 shadow-[0_4px_20px_-4px_rgba(0,97,255,0.06)]">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#0061FF] to-[#3B82F6] text-white flex items-center justify-center shadow-md shadow-blue-500/25 shrink-0">
+                    <Activity className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">کل حجم مصرفی</div>
+                    <div className="text-xl font-extrabold font-mono tabular-nums text-slate-900 dark:text-white mt-0.5" dir="ltr">
+                      {formatBytes(usedBytes)}
+                    </div>
+                  </div>
                 </div>
-                <div className="text-3xl font-extrabold font-mono text-purple-400 flex items-baseline gap-2">
-                  <span>{formatBytes(usedBytes)}</span>
+                <div className="mt-3.5 pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs font-mono" dir="ltr">
+                  <div>
+                    <span className="text-[#0061FF] dark:text-blue-400 font-sans font-semibold">دانلود: </span>
+                    <span className="font-bold text-slate-800 dark:text-slate-200">{formatBytes(downBytes)}</span>
+                  </div>
+                  <span className="text-slate-200 dark:text-slate-700">|</span>
+                  <div>
+                    <span className="text-[#0061FF] dark:text-blue-400 font-sans font-semibold">کل: </span>
+                    <span className="font-bold text-slate-800 dark:text-slate-200">{formatBytes(totalBytes)}</span>
+                  </div>
                 </div>
-                <p className="text-[11px] text-slate-400 mt-2">
-                  از مجموع {formatBytes(totalBytes)} ترافیک مجاز
-                </p>
               </div>
             </div>
 
             {/* Main Charts Grid: Left Donut Chart, Right 7-Day Bar Chart */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               {/* Circular Donut Chart Card */}
-              <div className="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col justify-between">
+              <div className="lg:col-span-5 bg-white dark:bg-slate-900 border border-[#E6EDFF] dark:border-slate-800 rounded-2xl p-6 shadow-[0_4px_20px_-4px_rgba(0,97,255,0.06)] flex flex-col justify-between">
                 <div>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <PieChart className="w-5 h-5 text-sky-400" />
-                      <h3 className="text-sm font-bold text-white">توزیع مصرف ترافیک شبکه</h3>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-9 h-9 rounded-xl bg-[#EEF4FF] dark:bg-blue-950/60 text-[#0061FF] dark:text-blue-400 flex items-center justify-center">
+                        <PieChart className="w-5 h-5" />
+                      </span>
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white">توزیع مصرف ترافیک شبکه</h3>
                     </div>
-                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-sky-500/10 text-sky-400 font-mono">
+                    <span className="text-xs px-2.5 py-1 rounded-lg bg-[#EEF4FF] dark:bg-blue-950/60 text-[#0061FF] dark:text-blue-400 font-bold">
                       زنده
                     </span>
                   </div>
-                  <p className="text-xs text-slate-400 leading-relaxed mb-4">
+                  <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed mb-4">
                     تفکیک دقیق ترافیک دانلود، آپلود و حجم باقی‌مانده کلیه اشتراک‌های کاربران پنل چشمک
                   </p>
                 </div>
@@ -1156,29 +1209,30 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                       cx="110"
                       cy="110"
                       r="75"
-                      stroke="#1e293b"
+                      stroke="#EEF4FF"
                       strokeWidth="16"
                       fill="transparent"
+                      className="dark:stroke-slate-800"
                     />
                     {/* Remaining Ring */}
                     <circle
                       cx="110"
                       cy="110"
                       r="75"
-                      stroke="#334155"
+                      stroke="#CBD9FF"
                       strokeWidth="16"
                       strokeDasharray={`${remDash} ${circumference}`}
                       strokeDashoffset={remOffset}
                       strokeLinecap="round"
                       fill="transparent"
-                      className="transition-all duration-1000 ease-out"
+                      className="transition-all duration-1000 ease-out dark:stroke-slate-700"
                     />
                     {/* Upload Ring */}
                     <circle
                       cx="110"
                       cy="110"
                       r="75"
-                      stroke="#a855f7"
+                      stroke="#60A5FA"
                       strokeWidth="16"
                       strokeDasharray={`${upDash} ${circumference}`}
                       strokeDashoffset={upOffset}
@@ -1191,7 +1245,7 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                       cx="110"
                       cy="110"
                       r="75"
-                      stroke="#38bdf8"
+                      stroke="#0061FF"
                       strokeWidth="16"
                       strokeDasharray={`${downDash} ${circumference}`}
                       strokeDashoffset="0"
@@ -1203,76 +1257,85 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
 
                   {/* Center Text */}
                   <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
-                    <span className="text-3xl font-black font-mono text-white tracking-tight">
+                    <span className="text-3xl font-black font-mono text-slate-900 dark:text-white tracking-tight">
                       {totalUsedPct}%
                     </span>
-                    <span className="text-[11px] font-semibold text-slate-400 mt-0.5">
+                    <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 mt-0.5">
                       مصرف شده
                     </span>
-                    <span className="text-[10px] text-slate-500 font-mono mt-0.5">
+                    <span className="text-[10px] text-[#0061FF] dark:text-blue-400 font-mono font-bold mt-0.5">
                       {formatBytes(usedBytes)}
                     </span>
                   </div>
                 </div>
 
                 {/* Legend Badges */}
-                <div className="grid grid-cols-3 gap-2 pt-4 border-t border-slate-800 text-center">
-                  <div className="p-2.5 bg-slate-950/80 rounded-xl border border-slate-800/80">
+                <div className="grid grid-cols-3 gap-2 pt-4 border-t border-slate-100 dark:border-slate-800 text-center">
+                  <div className="p-2.5 bg-[#F8FAFF] dark:bg-slate-950/80 rounded-xl border border-[#E6EDFF] dark:border-slate-800/80">
                     <div className="flex items-center justify-center gap-1.5 mb-1">
-                      <span className="w-2.5 h-2.5 rounded-full bg-sky-400"></span>
-                      <span className="text-[11px] text-slate-300 font-semibold">دانلود</span>
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#0061FF]"></span>
+                      <span className="text-[11px] text-slate-600 dark:text-slate-300 font-semibold">دانلود</span>
                     </div>
-                    <div className="text-xs font-bold font-mono text-sky-400">{formatBytes(downBytes)}</div>
-                    <div className="text-[10px] text-slate-500 font-mono mt-0.5">{downPct}%</div>
+                    <div className="text-xs font-bold font-mono text-[#0061FF] dark:text-blue-400">{formatBytes(downBytes)}</div>
+                    <div className="text-[10px] text-slate-400 font-mono mt-0.5">{downPct}%</div>
                   </div>
 
-                  <div className="p-2.5 bg-slate-950/80 rounded-xl border border-slate-800/80">
+                  <div className="p-2.5 bg-[#F8FAFF] dark:bg-slate-950/80 rounded-xl border border-[#E6EDFF] dark:border-slate-800/80">
                     <div className="flex items-center justify-center gap-1.5 mb-1">
-                      <span className="w-2.5 h-2.5 rounded-full bg-purple-400"></span>
-                      <span className="text-[11px] text-slate-300 font-semibold">آپلود</span>
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#60A5FA]"></span>
+                      <span className="text-[11px] text-slate-600 dark:text-slate-300 font-semibold">آپلود</span>
                     </div>
-                    <div className="text-xs font-bold font-mono text-purple-400">{formatBytes(upBytes)}</div>
-                    <div className="text-[10px] text-slate-500 font-mono mt-0.5">{upPct}%</div>
+                    <div className="text-xs font-bold font-mono text-blue-500 dark:text-blue-300">{formatBytes(upBytes)}</div>
+                    <div className="text-[10px] text-slate-400 font-mono mt-0.5">{upPct}%</div>
                   </div>
 
-                  <div className="p-2.5 bg-slate-950/80 rounded-xl border border-slate-800/80">
+                  <div className="p-2.5 bg-[#F8FAFF] dark:bg-slate-950/80 rounded-xl border border-[#E6EDFF] dark:border-slate-800/80">
                     <div className="flex items-center justify-center gap-1.5 mb-1">
-                      <span className="w-2.5 h-2.5 rounded-full bg-slate-400"></span>
-                      <span className="text-[11px] text-slate-300 font-semibold">باقی‌مانده</span>
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#CBD9FF]"></span>
+                      <span className="text-[11px] text-slate-600 dark:text-slate-300 font-semibold">باقی‌مانده</span>
                     </div>
-                    <div className="text-xs font-bold font-mono text-slate-300">{formatBytes(remainingBytes)}</div>
-                    <div className="text-[10px] text-slate-500 font-mono mt-0.5">{remPct}%</div>
+                    <div className="text-xs font-bold font-mono text-slate-700 dark:text-slate-300">{formatBytes(remainingBytes)}</div>
+                    <div className="text-[10px] text-slate-400 font-mono mt-0.5">{remPct}%</div>
                   </div>
                 </div>
               </div>
 
               {/* Right Side: 7-Day Usage Activity + Server Inbounds */}
               <div className="lg:col-span-7 space-y-6">
-                {/* 7-Day Usage Bar Chart */}
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+                {/* 7-Day Usage Bar Chart (Styled like Edaca Course Sell Bar Chart) */}
+                <div className="bg-white dark:bg-slate-900 border border-[#E6EDFF] dark:border-slate-800 rounded-2xl p-6 shadow-[0_4px_20px_-4px_rgba(0,97,255,0.06)]">
                   <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2">
-                      <BarChart3 className="w-5 h-5 text-indigo-400" />
-                      <h3 className="text-sm font-bold text-white">نمودار مصرف ۷ روز گذشته (گیگابایت)</h3>
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-9 h-9 rounded-xl bg-[#EEF4FF] dark:bg-blue-950/60 text-[#0061FF] dark:text-blue-400 flex items-center justify-center">
+                        <BarChart3 className="w-5 h-5" />
+                      </span>
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white">نمودار مصرف ۷ روز گذشته (گیگابایت)</h3>
                     </div>
-                    <span className="text-xs text-slate-400 font-mono">شنبه تا جمعه</span>
+                    <span className="text-xs px-3 py-1 rounded-lg bg-[#F4F7FE] dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-mono">
+                      شنبه تا جمعه
+                    </span>
                   </div>
 
-                  <div className="h-44 flex items-end justify-between gap-2 pt-6 pb-2 px-2">
+                  <div className="h-44 flex items-end justify-between gap-3 pt-6 pb-2 px-2">
                     {recentDays.map((d: any, idx: number) => {
-                      const barHeight = Math.max(12, Math.round(((d.trafficGB || 1) / maxDayTraffic) * 100));
+                      const barHeight = Math.max(15, Math.round(((d.trafficGB || 1) / maxDayTraffic) * 100));
+                      const isPeak = (d.trafficGB || 0) === maxDayTraffic;
                       return (
                         <div key={idx} className="flex-1 flex flex-col items-center gap-2 group">
-                          <div className="text-[10px] font-mono text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="text-[10px] font-mono font-bold text-[#0061FF] dark:text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity">
                             {d.trafficGB}GB
                           </div>
-                          <div className="w-full bg-slate-950 rounded-lg h-32 flex items-end p-1">
+                          <div className="w-full bg-[#F4F7FE] dark:bg-slate-950 rounded-xl h-32 flex items-end p-1">
                             <div
                               style={{ height: `${barHeight}%` }}
-                              className="w-full bg-gradient-to-t from-sky-600 via-indigo-600 to-indigo-400 rounded-md transition-all duration-700 group-hover:from-sky-500 group-hover:to-indigo-300 shadow-lg shadow-indigo-500/20"
+                              className={`w-full rounded-lg transition-all duration-700 ${
+                                isPeak
+                                  ? 'bg-gradient-to-t from-[#0052D4] via-[#0061FF] to-[#4389FF] shadow-lg shadow-blue-500/30'
+                                  : 'bg-gradient-to-t from-[#CFE0FF] to-[#93C5FD] dark:from-blue-900/60 dark:to-blue-600/60 group-hover:from-[#0061FF] group-hover:to-[#3B82F6]'
+                              }`}
                             ></div>
                           </div>
-                          <span className="text-[11px] font-semibold text-slate-400 group-hover:text-white transition-colors">
+                          <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 group-hover:text-[#0061FF] transition-colors">
                             {d.dayName}
                           </span>
                         </div>
@@ -1282,16 +1345,18 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                 </div>
 
                 {/* Connected Inbounds Status */}
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+                <div className="bg-white dark:bg-slate-900 border border-[#E6EDFF] dark:border-slate-800 rounded-2xl p-6 shadow-[0_4px_20px_-4px_rgba(0,97,255,0.06)] space-y-4">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Server className="w-5 h-5 text-emerald-400" />
-                      <h3 className="text-sm font-bold text-white">این‌باندهای متصل به پنل چشمک ({servers.length} سرور)</h3>
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-9 h-9 rounded-xl bg-[#EEF4FF] dark:bg-blue-950/60 text-[#0061FF] dark:text-blue-400 flex items-center justify-center">
+                        <Server className="w-5 h-5" />
+                      </span>
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white">این‌باندهای متصل به پنل چشمک ({servers.length} سرور)</h3>
                     </div>
                     <button
                       type="button"
                       onClick={() => setActiveTab('plans')}
-                      className="text-xs text-sky-400 hover:text-sky-300 flex items-center gap-1 font-semibold"
+                      className="text-xs text-[#0061FF] dark:text-blue-400 hover:underline flex items-center gap-1 font-bold"
                     >
                       <span>مدیریت پلن‌ها</span>
                       <ChevronRight className="w-3.5 h-3.5 rotate-180" />
@@ -1302,25 +1367,25 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                     {servers.map((s) => (
                       <div
                         key={s.id}
-                        className="p-3.5 bg-slate-950/80 border border-slate-800/80 rounded-xl flex items-center justify-between hover:border-slate-700 transition-colors"
+                        className="p-3.5 bg-[#F8FAFF] dark:bg-slate-950/80 border border-[#E6EDFF] dark:border-slate-800/80 rounded-xl flex items-center justify-between hover:border-[#0061FF]/40 transition-colors"
                       >
                         <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center text-xs font-mono font-bold">
+                          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#0061FF] to-[#3B82F6] text-white flex items-center justify-center text-xs font-mono font-bold shadow-sm shadow-blue-500/20">
                             #{s.id}
                           </div>
                           <div>
-                            <div className="text-xs font-bold text-white flex items-center gap-2">
+                            <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
                               <span>{s.name}</span>
-                              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-sky-500/20 text-sky-300 uppercase">
-                                {s.protocol}
+                              <span className="text-[10px] font-mono text-[#0061FF] dark:text-blue-400 uppercase">
+                                · {s.protocol}
                               </span>
                             </div>
-                            <div className="text-[11px] text-slate-400 font-mono mt-0.5">
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono mt-0.5">
                               Port: {s.port} · {s.network}
                             </div>
                           </div>
                         </div>
-                        <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400"></span>
+                        <span className="text-[11px] font-semibold text-[#0061FF] dark:text-blue-400">فعال</span>
                       </div>
                     ))}
                   </div>
@@ -1335,20 +1400,24 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
       {activeTab === 'plans' && (
         <div className="space-y-6">
           {/* Section 1: Onboarding & Free Trial Settings */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
-              <div>
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-amber-400" />
-                  <span>تنظیمات هدیه خوش‌آمدگویی و حجم اکانت تست اولیه</span>
-                </h3>
-                <p className="text-xs text-slate-400 mt-1">
-                  می‌توانید توکن اهدایی به کاربران در بدو ثبت‌نام، حجم تست و روزهای اعتبار آن را به دلخواه خود تغییر دهید.
-                </p>
+          <div className="bg-white dark:bg-slate-900 border border-[#E6EDFF] dark:border-slate-800 rounded-2xl p-6 shadow-[0_4px_20px_-4px_rgba(0,97,255,0.06)] space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <span className="w-10 h-10 rounded-xl bg-[#EEF4FF] dark:bg-blue-950/60 text-[#0061FF] dark:text-blue-400 flex items-center justify-center shrink-0">
+                  <Sparkles className="w-5 h-5" />
+                </span>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                    تنظیمات هدیه خوش‌آمدگویی و حجم اکانت تست اولیه
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    می‌توانید توکن اهدایی به کاربران در بدو ثبت‌نام، حجم تست و روزهای اعتبار آن را به دلخواه خود تغییر دهید.
+                  </p>
+                </div>
               </div>
 
               {onboardingSaveMsg && (
-                <div className="px-3 py-1.5 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-semibold">
+                <div className="px-3 py-1.5 rounded-xl bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 text-[#0061FF] dark:text-blue-300 text-xs font-bold">
                   {onboardingSaveMsg}
                 </div>
               )}
@@ -1356,7 +1425,7 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="space-y-1.5">
-                <label className="text-xs text-slate-300 font-semibold">
+                <label className="text-xs text-slate-700 dark:text-slate-300 font-semibold">
                   توکن هدیه ثبت‌نام (Welcome Tokens):
                 </label>
                 <div className="relative">
@@ -1364,16 +1433,16 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                     type="number"
                     value={welcomeTokensInput}
                     onChange={(e) => setWelcomeTokensInput(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono focus:border-sky-500 focus:outline-none"
+                    className="w-full bg-[#F8FAFF] dark:bg-slate-950 border border-[#E6EDFF] dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white font-mono focus:border-[#0061FF] focus:outline-none"
                     placeholder="1000"
                   />
-                  <span className="absolute left-3 top-2.5 text-[11px] text-amber-400 font-bold">توکن</span>
+                  <span className="absolute left-3 top-2.5 text-[11px] text-[#0061FF] dark:text-blue-400 font-bold">توکن</span>
                 </div>
                 <p className="text-[10px] text-slate-500">موجودی اولیه کاربر پس از عضویت در اپلیکیشن</p>
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs text-slate-300 font-semibold">
+                <label className="text-xs text-slate-700 dark:text-slate-300 font-semibold">
                   حجم اشتراک تست اولیه (Traffic GB):
                 </label>
                 <div className="relative">
@@ -1381,16 +1450,16 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                     type="number"
                     value={freeTrialTrafficGBInput}
                     onChange={(e) => setFreeTrialTrafficGBInput(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono focus:border-sky-500 focus:outline-none"
+                    className="w-full bg-[#F8FAFF] dark:bg-slate-950 border border-[#E6EDFF] dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white font-mono focus:border-[#0061FF] focus:outline-none"
                     placeholder="1"
                   />
-                  <span className="absolute left-3 top-2.5 text-[11px] text-sky-400 font-bold">گیگابایت</span>
+                  <span className="absolute left-3 top-2.5 text-[11px] text-[#0061FF] dark:text-blue-400 font-bold">گیگابایت</span>
                 </div>
                 <p className="text-[10px] text-slate-500">حجم اختصاصی پلن تست اولیه در پنل ثنایی</p>
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs text-slate-300 font-semibold">
+                <label className="text-xs text-slate-700 dark:text-slate-300 font-semibold">
                   مدت زمان اعتبار اکانت تست (روز):
                 </label>
                 <div className="relative">
@@ -1398,10 +1467,10 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                     type="number"
                     value={freeTrialDaysInput}
                     onChange={(e) => setFreeTrialDaysInput(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono focus:border-sky-500 focus:outline-none"
+                    className="w-full bg-[#F8FAFF] dark:bg-slate-950 border border-[#E6EDFF] dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white font-mono focus:border-[#0061FF] focus:outline-none"
                     placeholder="3"
                   />
-                  <span className="absolute left-3 top-2.5 text-[11px] text-emerald-400 font-bold">روز</span>
+                  <span className="absolute left-3 top-2.5 text-[11px] text-[#0061FF] dark:text-blue-400 font-bold">روز</span>
                 </div>
                 <p className="text-[10px] text-slate-500">تعداد روزهای فعال بودن اشتراک تست</p>
               </div>
@@ -1412,7 +1481,7 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                 type="button"
                 onClick={handleSaveOnboardingSettings}
                 disabled={isSavingOnboarding}
-                className="px-6 py-2.5 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-sky-600/20 flex items-center gap-2"
+                className="px-6 py-2.5 bg-gradient-to-r from-[#0061FF] to-[#2B7FFF] hover:from-[#0052D6] hover:to-[#1D68E8] text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-blue-500/25 flex items-center gap-2"
               >
                 {isSavingOnboarding ? (
                   <RefreshCw className="w-4 h-4 animate-spin" />
@@ -1425,22 +1494,26 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
           </div>
 
           {/* Section 2: Plans Catalog Management */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
-              <div>
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Layers className="w-4 h-4 text-sky-400" />
-                  <span>مدیریت پلن‌های اشتراک ({plans.length} پلن تعریف‌شده)</span>
-                </h3>
-                <p className="text-xs text-slate-400 mt-1">
-                  می‌توانید پلن‌های موجود را ویرایش یا حذف کرده و یا پلن جدید با حجم، قیمت توکنی و روز دلخواه اضافه کنید.
-                </p>
+          <div className="bg-white dark:bg-slate-900 border border-[#E6EDFF] dark:border-slate-800 rounded-2xl p-6 shadow-[0_4px_20px_-4px_rgba(0,97,255,0.06)] space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <span className="w-10 h-10 rounded-xl bg-[#EEF4FF] dark:bg-blue-950/60 text-[#0061FF] dark:text-blue-400 flex items-center justify-center shrink-0">
+                  <Layers className="w-5 h-5" />
+                </span>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                    مدیریت پلن‌های اشتراک ({plans.length} پلن تعریف‌شده)
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    می‌توانید پلن‌های موجود را ویرایش یا حذف کرده و یا پلن جدید با حجم، قیمت توکنی و روز دلخواه (حتی ۰ رایگان) اضافه کنید.
+                  </p>
+                </div>
               </div>
 
               <button
                 type="button"
                 onClick={handleOpenAddPlanModal}
-                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-emerald-600/20 flex items-center gap-2 whitespace-nowrap"
+                className="px-4 py-2.5 bg-gradient-to-r from-[#0061FF] to-[#2B7FFF] hover:from-[#0052D6] hover:to-[#1D68E8] text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-blue-500/25 flex items-center gap-2 whitespace-nowrap"
               >
                 <Plus className="w-4 h-4" />
                 <span>+ ایجاد اشتراک جدید</span>
@@ -1453,55 +1526,55 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                   key={p.id}
                   className={`p-5 rounded-2xl border flex flex-col justify-between transition-all ${
                     p.isPopular
-                      ? 'bg-gradient-to-br from-slate-900 via-slate-900 to-sky-950/40 border-sky-500/50 ring-1 ring-sky-500/30'
-                      : 'bg-slate-950 border-slate-800'
+                      ? 'bg-[#F8FAFF] dark:bg-slate-900 border-[#0061FF]/50 ring-1 ring-[#0061FF]/20'
+                      : 'bg-white dark:bg-slate-950 border-[#E6EDFF] dark:border-slate-800'
                   }`}
                 >
                   <div>
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs font-bold text-white">{p.name}</span>
+                      <span className="text-xs font-bold text-slate-900 dark:text-white">{p.name}</span>
                       {p.isPopular && (
-                        <span className="text-[10px] font-bold text-sky-300 bg-sky-500/20 px-2 py-0.5 rounded-full border border-sky-500/30">
+                        <span className="text-[10px] font-bold text-[#0061FF] dark:text-blue-300 bg-[#EEF4FF] dark:bg-blue-500/20 px-2 py-0.5 rounded-md">
                           پیشنهادی
                         </span>
                       )}
                     </div>
 
-                    <div className="text-3xl font-extrabold font-mono text-white my-2 flex items-baseline gap-1">
+                    <div className="text-3xl font-extrabold font-mono text-slate-900 dark:text-white my-2 flex items-baseline gap-1">
                       <span>{p.trafficGB}</span>
-                      <span className="text-xs text-slate-400 font-normal">گیگابایت</span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400 font-normal">گیگابایت</span>
                     </div>
 
-                    <div className="text-xs text-emerald-400 mb-2 font-mono flex items-center gap-1">
+                    <div className="text-xs text-[#0061FF] dark:text-blue-400 mb-2 font-mono font-semibold flex items-center gap-1">
                       <Clock className="w-3.5 h-3.5" />
                       <span>اعتبار: {p.periodDays} روز</span>
                     </div>
 
-                    <div className="text-xs text-slate-400 mb-3 font-mono flex items-center gap-1">
-                      <Server className="w-3.5 h-3.5 text-purple-400" />
+                    <div className="text-xs text-slate-500 dark:text-slate-400 mb-3 font-mono flex items-center gap-1">
+                      <Server className="w-3.5 h-3.5 text-[#0061FF]" />
                       <span>این‌باند: #{p.inboundId || 4}</span>
                     </div>
 
-                    <p className="text-xs text-slate-400 leading-relaxed line-clamp-2 mb-4">
+                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed line-clamp-2 mb-4">
                       {p.description}
                     </p>
                   </div>
 
-                  <div className="pt-3 border-t border-slate-800 space-y-3">
+                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-3">
                     <div className="flex items-center justify-between">
-                      <span className="font-mono font-bold text-amber-400 text-sm">{p.priceTokens} توکن</span>
-                      {p.priceTomans && (
-                        <span className="text-xs text-slate-400 font-mono">
-                          {p.priceTomans.toLocaleString()} ت
-                        </span>
-                      )}
+                      <span className="font-mono font-bold text-[#0061FF] dark:text-blue-400 text-sm">
+                        {p.priceTokens === 0 ? 'رایگان (۰ توکن)' : `${p.priceTokens} توکن`}
+                      </span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">
+                        {p.priceTomans && p.priceTomans > 0 ? `${p.priceTomans.toLocaleString()} ت` : 'رایگان'}
+                      </span>
                     </div>
 
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
                         onClick={() => handleOpenEditPlanModal(p)}
-                        className="flex-1 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1"
+                        className="flex-1 py-1.5 bg-[#EEF4FF] hover:bg-blue-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-[#0061FF] dark:text-slate-200 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1"
                       >
                         <Edit2 className="w-3 h-3" />
                         <span>ویرایش</span>
@@ -1509,7 +1582,7 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                       <button
                         type="button"
                         onClick={() => handleDeletePlan(p.id, p.name)}
-                        className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-lg transition-colors"
+                        className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 rounded-lg transition-colors"
                         title="حذف پلن"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -2464,46 +2537,58 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
       {/* TAB 5: WALLET & GIFT CODES */}
       {activeTab === 'wallet' && (
         <div className="space-y-6">
-          {/* Top Wallet Summary Cards */}
+          {/* Top Wallet Summary Cards - Edaca Style */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="p-5 bg-gradient-to-br from-amber-500/10 via-slate-900 to-slate-900 border border-amber-500/30 rounded-2xl space-y-2">
-              <div className="flex items-center justify-between text-xs text-amber-400">
-                <span>کل توکن‌های در گردش کاربران</span>
-                <Coins className="w-4 h-4" />
+            <div className="p-5 bg-white dark:bg-slate-900 border border-[#E6EDFF] dark:border-slate-800 rounded-2xl shadow-sm shadow-blue-500/5 space-y-3">
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#0061FF] to-[#3B82F6] flex items-center justify-center text-white shadow-md shadow-blue-500/25 shrink-0">
+                  <Coins className="w-6 h-6" />
+                </div>
+                <div>
+                  <span className="text-xs font-medium text-slate-500 dark:text-slate-400 block">کل توکن‌های در گردش کاربران</span>
+                  <div className="text-2xl font-black font-mono text-slate-900 dark:text-white mt-0.5">
+                    {users.reduce((acc, u) => acc + (u.tokens || 0), 0).toLocaleString()}
+                    <span className="text-xs font-semibold text-[#0061FF] dark:text-blue-400 mr-1.5">توکن</span>
+                  </div>
+                </div>
               </div>
-              <div className="text-3xl font-black font-mono text-white">
-                {users.reduce((acc, u) => acc + (u.tokens || 0), 0).toLocaleString()}
-                <span className="text-sm text-amber-400 mr-2">توکن</span>
-              </div>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-slate-500 dark:text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800/80">
                 قابل مصرف در اپلیکیشن موبایل برای خرید اشتراک‌های VLESS ثنایی
               </p>
             </div>
 
-            <div className="p-5 bg-gradient-to-br from-emerald-500/10 via-slate-900 to-slate-900 border border-emerald-500/30 rounded-2xl space-y-2">
-              <div className="flex items-center justify-between text-xs text-emerald-400">
-                <span>کدهای هدیه و ووچرهای فعال</span>
-                <Sparkles className="w-4 h-4" />
+            <div className="p-5 bg-white dark:bg-slate-900 border border-[#E6EDFF] dark:border-slate-800 rounded-2xl shadow-sm shadow-blue-500/5 space-y-3">
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#0061FF] to-[#3B82F6] flex items-center justify-center text-white shadow-md shadow-blue-500/25 shrink-0">
+                  <Sparkles className="w-6 h-6" />
+                </div>
+                <div>
+                  <span className="text-xs font-medium text-slate-500 dark:text-slate-400 block">کدهای هدیه و ووچرهای فعال</span>
+                  <div className="text-2xl font-black font-mono text-slate-900 dark:text-white mt-0.5">
+                    {giftCodes.length}
+                    <span className="text-xs font-semibold text-[#0061FF] dark:text-blue-400 mr-1.5">کد فعال</span>
+                  </div>
+                </div>
               </div>
-              <div className="text-3xl font-black font-mono text-white">
-                {giftCodes.length}
-                <span className="text-sm text-emerald-400 mr-2">کد فعال</span>
-              </div>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-slate-500 dark:text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800/80">
                 کدهای معتبر برای افزایش خودکار موجودی کاربران در تب Wallet
               </p>
             </div>
 
-            <div className="p-5 bg-gradient-to-br from-sky-500/10 via-slate-900 to-slate-900 border border-sky-500/30 rounded-2xl space-y-2">
-              <div className="flex items-center justify-between text-xs text-sky-400">
-                <span>هدیه خوش‌آمدگویی ثبت‌نام</span>
-                <Zap className="w-4 h-4" />
+            <div className="p-5 bg-white dark:bg-slate-900 border border-[#E6EDFF] dark:border-slate-800 rounded-2xl shadow-sm shadow-blue-500/5 space-y-3">
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#0061FF] to-[#3B82F6] flex items-center justify-center text-white shadow-md shadow-blue-500/25 shrink-0">
+                  <Zap className="w-6 h-6" />
+                </div>
+                <div>
+                  <span className="text-xs font-medium text-slate-500 dark:text-slate-400 block">هدیه خوش‌آمدگویی ثبت‌نام</span>
+                  <div className="text-2xl font-black font-mono text-slate-900 dark:text-white mt-0.5">
+                    {Number(welcomeTokensInput || 1000).toLocaleString()}
+                    <span className="text-xs font-semibold text-[#0061FF] dark:text-blue-400 mr-1.5">توکن رایگان</span>
+                  </div>
+                </div>
               </div>
-              <div className="text-3xl font-black font-mono text-white">
-                1,000
-                <span className="text-sm text-sky-400 mr-2">توکن رایگان</span>
-              </div>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-slate-500 dark:text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800/80">
                 به هر کاربر جدید در بدو ثبت‌نام یا نصب اپلیکیشن اهدا می‌شود
               </p>
             </div>

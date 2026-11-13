@@ -1507,8 +1507,8 @@ async function startServer() {
     res.json({
       status: 'ok',
       online: true,
-      server: 'Sanaei Mobile App Bridge',
-      version: '3.0.0',
+      server: 'Cheshmak Panel v4.0',
+      version: '4.0.0',
       timestamp: Date.now(),
       sanaeiConnected: true,
       welcomeTokens: bridgeStore.getSettings().welcomeTokens,
