@@ -2837,8 +2837,8 @@ async function startServer() {
 
   // Upload base.apk via multipart/form-data using Multer
   app.post('/api/bridge/admin/upload-base-apk', (req, res) => {
-    req.setTimeout(600000);
-    res.setTimeout(600000);
+    req.setTimeout(1800000);
+    res.setTimeout(1800000);
     apkUpload.any()(req, res, (uploadErr: any) => {
       if (uploadErr) {
         return res.status(400).json({
@@ -3171,10 +3171,10 @@ async function startServer() {
   const httpServer = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Sanaei Management Panel server listening on http://0.0.0.0:${PORT}`);
   });
-  httpServer.timeout = 600000;
-  httpServer.requestTimeout = 600000;
-  httpServer.keepAliveTimeout = 600000;
-  httpServer.headersTimeout = 610000;
+  httpServer.timeout = 1800000;
+  httpServer.requestTimeout = 1800000;
+  httpServer.keepAliveTimeout = 1800000;
+  httpServer.headersTimeout = 1810000;
 }
 
 startServer();

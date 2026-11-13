@@ -3246,8 +3246,8 @@ ${statusText}`;
     limits: { fileSize: 200 * 1024 * 1024 }
   });
   app.post("/api/bridge/admin/upload-base-apk", (req, res) => {
-    req.setTimeout(6e5);
-    res.setTimeout(6e5);
+    req.setTimeout(18e5);
+    res.setTimeout(18e5);
     apkUpload.any()(req, res, (uploadErr) => {
       if (uploadErr) {
         return res.status(400).json({
@@ -3538,9 +3538,9 @@ ${statusText}`;
   const httpServer = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Sanaei Management Panel server listening on http://0.0.0.0:${PORT}`);
   });
-  httpServer.timeout = 6e5;
-  httpServer.requestTimeout = 6e5;
-  httpServer.keepAliveTimeout = 6e5;
-  httpServer.headersTimeout = 61e4;
+  httpServer.timeout = 18e5;
+  httpServer.requestTimeout = 18e5;
+  httpServer.keepAliveTimeout = 18e5;
+  httpServer.headersTimeout = 181e4;
 }
 startServer();

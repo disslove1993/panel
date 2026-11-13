@@ -939,7 +939,7 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
       setApkBuildError('زمان آپلود فایل به پایان رسید. لطفاً مجدداً تلاش کنید.');
     };
 
-    xhr.timeout = 600000;
+    xhr.timeout = 1800000;
     xhr.send(formData);
   };
 
