@@ -39,20 +39,6 @@ sanaei-bridge
 
 ---
 
-## 📦 نحوه آپلود و ارسال پروژه به گیت‌هاب (GitHub)
-
-برای اینکه پروژه را در ریپازیتوری `disslove1993/panel` قرار دهید:
-
-```bash
-git init
-git add .
-git commit -m "Initial commit of Sanaei Bridge Panel"
-git branch -M main
-git remote add origin https://github.com/disslove1993/panel.git
-git push -u origin main
-```
-
----
 
 ## 🌐 تنظیم دامنه اختصاصی (Custom Domain & SSL)
 
