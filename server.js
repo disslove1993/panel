@@ -3158,12 +3158,12 @@ ${statusText}`;
   });
   const runSpawnAsync = (cmd, timeoutMs = 6e5) => {
     return new Promise((resolve, reject) => {
-      const fullCommand = `export _JAVA_OPTIONS="-Xmx512m" && ${cmd}`;
+      const fullCommand = `export _JAVA_OPTIONS="-Xmx1024m" && ${cmd}`;
       broadcastApkLog(`$ ${cmd}`);
       const child = spawn("bash", ["-c", fullCommand], {
         env: {
           ...process.env,
-          _JAVA_OPTIONS: "-Xmx512m"
+          _JAVA_OPTIONS: "-Xmx1024m"
         }
       });
       let stdoutAcc = "";
@@ -3301,8 +3301,10 @@ ${statusText}`;
     recentApkLogs = [];
     broadcastApkLog("============================================================");
     broadcastApkLog("[INFO] Starting White-Label Custom APK Build Pipeline...");
-    broadcastApkLog('[INFO] Java Memory Limit: export _JAVA_OPTIONS="-Xmx512m"');
+    broadcastApkLog('[INFO] Java Memory Limit: export _JAVA_OPTIONS="-Xmx1024m"');
     try {
+      broadcastApkLog("[CLEANUP] Terminating any stale Java processes (pkill -9 -f java)...");
+      await runSpawnAsync("pkill -9 -f '[j]ava' || true");
       broadcastApkLog("[STEP 0/5] Checking required build tools (java, keytool, apktool, zipalign, apksigner)...");
       try {
         await runSpawnAsync(
@@ -3350,9 +3352,9 @@ ${statusText}`;
       const reqHost = req.get("host") || `127.0.0.1:${process.env.PORT || 3e3}`;
       const detectedServerUrl = `${reqProto}://${reqHost}`;
       const targetServerUrl = req.body?.serverUrl && String(req.body.serverUrl).trim() ? String(req.body.serverUrl).trim().replace(/\/+$/, "") : detectedServerUrl;
-      broadcastApkLog("[STEP 1/4] Cleaning temporary build directories & decoding base.apk with apktool...");
+      broadcastApkLog("[STEP 1/4] Cleaning temporary build directories & decoding base.apk with apktool --use-aapt2...");
       await runSpawnAsync("rm -rf /tmp/apk_build /tmp/unsigned.apk /tmp/aligned.apk");
-      await runSpawnAsync(`apktool d -f "${baseApkPath}" -o /tmp/apk_build`);
+      await runSpawnAsync(`apktool d --use-aapt2 -f "${baseApkPath}" -o /tmp/apk_build`);
       broadcastApkLog(`[STEP 2/4] Injecting bridge_server_url (${targetServerUrl}) into assets/config.json...`);
       const assetsDir = "/tmp/apk_build/assets";
       const configJsonPath = path2.join(assetsDir, "config.json");
@@ -3371,8 +3373,8 @@ ${statusText}`;
       configData.bridge_server_url = targetServerUrl;
       fs2.writeFileSync(configJsonPath, JSON.stringify(configData, null, 2), "utf-8");
       broadcastApkLog(`[OK] Updated ${configJsonPath} -> ${JSON.stringify(configData)}`);
-      broadcastApkLog("[STEP 3/4] Rebuilding modified APK package with apktool b...");
-      await runSpawnAsync("apktool b /tmp/apk_build -o /tmp/unsigned.apk");
+      broadcastApkLog("[STEP 3/4] Rebuilding modified APK package with apktool b --use-aapt2...");
+      await runSpawnAsync("apktool b --use-aapt2 /tmp/apk_build -o /tmp/unsigned.apk");
       broadcastApkLog("[STEP 4/4] Aligning with zipalign and signing with apksigner...");
       await runSpawnAsync("zipalign -p -f 4 /tmp/unsigned.apk /tmp/aligned.apk");
       await runSpawnAsync(`apksigner sign --ks "${keystorePath}" --ks-pass pass:android /tmp/aligned.apk`);

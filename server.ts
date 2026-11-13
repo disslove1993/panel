@@ -2726,19 +2726,19 @@ async function startServer() {
     });
   });
 
-  // Spawn helper that streams stdout & stderr to SSE clients in real time with _JAVA_OPTIONS="-Xmx512m"
+  // Spawn helper that streams stdout & stderr to SSE clients in real time with _JAVA_OPTIONS="-Xmx1024m"
   const runSpawnAsync = (
     cmd: string,
     timeoutMs: number = 600000
   ): Promise<{ stdout: string; stderr: string }> => {
     return new Promise((resolve, reject) => {
-      const fullCommand = `export _JAVA_OPTIONS="-Xmx512m" && ${cmd}`;
+      const fullCommand = `export _JAVA_OPTIONS="-Xmx1024m" && ${cmd}`;
       broadcastApkLog(`$ ${cmd}`);
 
       const child = spawn('bash', ['-c', fullCommand], {
         env: {
           ...process.env,
-          _JAVA_OPTIONS: '-Xmx512m',
+          _JAVA_OPTIONS: '-Xmx1024m',
         },
       });
 
@@ -2900,9 +2900,13 @@ async function startServer() {
     recentApkLogs = [];
     broadcastApkLog('============================================================');
     broadcastApkLog('[INFO] Starting White-Label Custom APK Build Pipeline...');
-    broadcastApkLog('[INFO] Java Memory Limit: export _JAVA_OPTIONS="-Xmx512m"');
+    broadcastApkLog('[INFO] Java Memory Limit: export _JAVA_OPTIONS="-Xmx1024m"');
 
     try {
+      // Clean up any stale/hung Java processes from previous failed builds before starting
+      broadcastApkLog('[CLEANUP] Terminating any stale Java processes (pkill -9 -f java)...');
+      await runSpawnAsync("pkill -9 -f '[j]ava' || true");
+
       // Pre-flight dependency check for required Android APK build tools
       broadcastApkLog('[STEP 0/5] Checking required build tools (java, keytool, apktool, zipalign, apksigner)...');
       try {
@@ -2963,10 +2967,10 @@ async function startServer() {
           ? String(req.body.serverUrl).trim().replace(/\/+$/, '')
           : detectedServerUrl;
 
-      // 1. Clean temp folders & Decode base.apk
-      broadcastApkLog('[STEP 1/4] Cleaning temporary build directories & decoding base.apk with apktool...');
+      // 1. Clean temp folders & Decode base.apk with AAPT2
+      broadcastApkLog('[STEP 1/4] Cleaning temporary build directories & decoding base.apk with apktool --use-aapt2...');
       await runSpawnAsync('rm -rf /tmp/apk_build /tmp/unsigned.apk /tmp/aligned.apk');
-      await runSpawnAsync(`apktool d -f "${baseApkPath}" -o /tmp/apk_build`);
+      await runSpawnAsync(`apktool d --use-aapt2 -f "${baseApkPath}" -o /tmp/apk_build`);
 
       // 2. Inject Server URL into /tmp/apk_build/assets/config.json
       broadcastApkLog(`[STEP 2/4] Injecting bridge_server_url (${targetServerUrl}) into assets/config.json...`);
@@ -2989,9 +2993,9 @@ async function startServer() {
       fs.writeFileSync(configJsonPath, JSON.stringify(configData, null, 2), 'utf-8');
       broadcastApkLog(`[OK] Updated ${configJsonPath} -> ${JSON.stringify(configData)}`);
 
-      // 3. Rebuild APK with apktool b
-      broadcastApkLog('[STEP 3/4] Rebuilding modified APK package with apktool b...');
-      await runSpawnAsync('apktool b /tmp/apk_build -o /tmp/unsigned.apk');
+      // 3. Rebuild APK with apktool b --use-aapt2
+      broadcastApkLog('[STEP 3/4] Rebuilding modified APK package with apktool b --use-aapt2...');
+      await runSpawnAsync('apktool b --use-aapt2 /tmp/apk_build -o /tmp/unsigned.apk');
 
       // 4. Align & Sign APK
       broadcastApkLog('[STEP 4/4] Aligning with zipalign and signing with apksigner...');

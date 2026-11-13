@@ -2467,7 +2467,7 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                     </div>
                     <div className="flex items-center gap-1.5 text-xs font-mono text-gray-300" dir="ltr">
                       <Terminal className="w-3.5 h-3.5 text-green-400" />
-                      <span>Live Build Terminal — apktool / apksigner (_JAVA_OPTIONS="-Xmx512m")</span>
+                      <span>Live Build Terminal — apktool (--use-aapt2) / apksigner (_JAVA_OPTIONS="-Xmx1024m")</span>
                     </div>
                     {isBuildingApk && (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
