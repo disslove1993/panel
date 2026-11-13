@@ -4,7 +4,7 @@ import http from "http";
 import https from "https";
 import path2 from "path";
 import fs2 from "fs";
-import { execSync } from "child_process";
+import { exec, execSync } from "child_process";
 import { fileURLToPath as fileURLToPath2 } from "url";
 
 // bridgeStore.ts
@@ -1319,14 +1319,37 @@ async function startServer() {
   app.use(express.json({ limit: "25mb" }));
   app.use(express.urlencoded({ extended: true, limit: "25mb" }));
   const receiptsDir = path2.resolve(__dirname, "public/uploads/receipts");
+  const apkDir = path2.resolve(__dirname, "public/apk");
+  const downloadsDir = path2.resolve(__dirname, "public/downloads");
+  const keystorePath = path2.resolve(apkDir, "my-upload-key.jks");
+  const baseApkPath = path2.resolve(apkDir, "base.apk");
+  const customApkPath = path2.resolve(downloadsDir, "Cheshmak-Custom.apk");
   try {
     if (!fs2.existsSync(receiptsDir)) {
       fs2.mkdirSync(receiptsDir, { recursive: true });
     }
+    if (!fs2.existsSync(apkDir)) {
+      fs2.mkdirSync(apkDir, { recursive: true });
+    }
+    if (!fs2.existsSync(downloadsDir)) {
+      fs2.mkdirSync(downloadsDir, { recursive: true });
+    }
   } catch (err) {
-    console.warn("Could not create receipts dir:", err);
+    console.warn("Could not create required public directories:", err);
+  }
+  if (!fs2.existsSync(keystorePath)) {
+    try {
+      execSync(
+        `keytool -genkeypair -v -keystore "${keystorePath}" -storepass android -alias upload -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=NovaShield,OU=Mobile,O=Nova,L=Tehran,S=Tehran,C=IR"`,
+        { stdio: "pipe" }
+      );
+      console.log("Generated Android signing keystore at:", keystorePath);
+    } catch (err) {
+      console.warn("Could not auto-generate keystore on startup (keytool may not be installed yet):", err?.message || err);
+    }
   }
   app.use("/uploads", express.static(path2.resolve(__dirname, "public/uploads")));
+  app.use("/downloads", express.static(downloadsDir));
   app.get("/install.sh", (_req, res) => {
     const p1 = path2.resolve(__dirname, "public/install.sh");
     const p2 = path2.resolve(__dirname, "install.sh");
@@ -3083,6 +3106,146 @@ ${statusText}`;
       res.status(500).json({ success: false, message: err?.message || "\u062E\u0637\u0627 \u062F\u0631 \u0627\u0631\u062A\u0628\u0627\u0637 \u0628\u0627 \u0633\u0631\u0648\u0631\u0647\u0627\u06CC \u062A\u0644\u06AF\u0631\u0627\u0645" });
     }
   });
+  const runExecAsync = (cmd) => {
+    return new Promise((resolve, reject) => {
+      exec(cmd, { maxBuffer: 25 * 1024 * 1024 }, (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(stderr?.trim() || stdout?.trim() || error.message));
+          return;
+        }
+        resolve({ stdout, stderr });
+      });
+    });
+  };
+  app.get("/api/bridge/admin/apk-status", (_req, res) => {
+    const hasBaseApk = fs2.existsSync(baseApkPath);
+    const hasKeystore = fs2.existsSync(keystorePath);
+    const hasCustomApk = fs2.existsSync(customApkPath);
+    let baseApkSize = 0;
+    let customApkSize = 0;
+    let customApkUpdatedAt = 0;
+    try {
+      if (hasBaseApk) baseApkSize = fs2.statSync(baseApkPath).size;
+      if (hasCustomApk) {
+        const st = fs2.statSync(customApkPath);
+        customApkSize = st.size;
+        customApkUpdatedAt = st.mtimeMs;
+      }
+    } catch {
+    }
+    res.json({
+      success: true,
+      hasBaseApk,
+      baseApkSize,
+      hasKeystore,
+      hasCustomApk,
+      customApkSize,
+      customApkUpdatedAt,
+      downloadUrl: "/api/bridge/download-apk",
+      staticUrl: "/downloads/Cheshmak-Custom.apk"
+    });
+  });
+  app.post(
+    "/api/bridge/admin/upload-base-apk",
+    express.raw({ type: ["application/octet-stream", "application/vnd.android.package-archive"], limit: "200mb" }),
+    (req, res) => {
+      try {
+        if (!Buffer.isBuffer(req.body) || req.body.length < 100) {
+          return res.status(400).json({ success: false, message: "\u0641\u0627\u06CC\u0644 APK \u0627\u0631\u0633\u0627\u0644\u06CC \u0645\u0639\u062A\u0628\u0631 \u0646\u06CC\u0633\u062A \u06CC\u0627 \u062E\u0627\u0644\u06CC \u0627\u0633\u062A." });
+        }
+        if (!fs2.existsSync(apkDir)) {
+          fs2.mkdirSync(apkDir, { recursive: true });
+        }
+        fs2.writeFileSync(baseApkPath, req.body);
+        res.json({
+          success: true,
+          message: "\u0641\u0627\u06CC\u0644 \u067E\u0627\u06CC\u0647 base.apk \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u062F\u0631 \u0645\u0633\u06CC\u0631 public/apk/base.apk \u0630\u062E\u06CC\u0631\u0647 \u0634\u062F.",
+          size: req.body.length
+        });
+      } catch (err) {
+        res.status(500).json({ success: false, message: err?.message || "\u062E\u0637\u0627 \u062F\u0631 \u0630\u062E\u06CC\u0631\u0647 \u0641\u0627\u06CC\u0644 base.apk" });
+      }
+    }
+  );
+  app.post("/api/bridge/admin/build-apk", async (req, res) => {
+    try {
+      if (!fs2.existsSync(baseApkPath)) {
+        return res.status(404).json({
+          success: false,
+          code: "BASE_APK_MISSING",
+          message: "\u0641\u0627\u06CC\u0644 \u067E\u0627\u06CC\u0647 base.apk \u062F\u0631 \u067E\u0648\u0634\u0647 public/apk \u06CC\u0627\u0641\u062A \u0646\u0634\u062F. \u0644\u0637\u0641\u0627\u064B \u0627\u0628\u062A\u062F\u0627 \u0641\u0627\u06CC\u0644 base.apk \u0631\u0627 \u0622\u067E\u0644\u0648\u062F \u06CC\u0627 \u062F\u0631 \u0633\u0631\u0648\u0631 \u0642\u0631\u0627\u0631 \u062F\u0647\u06CC\u062F."
+        });
+      }
+      if (!fs2.existsSync(downloadsDir)) {
+        fs2.mkdirSync(downloadsDir, { recursive: true });
+      }
+      if (!fs2.existsSync(keystorePath)) {
+        try {
+          await runExecAsync(
+            `keytool -genkeypair -v -keystore "${keystorePath}" -storepass android -alias upload -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=NovaShield,OU=Mobile,O=Nova,L=Tehran,S=Tehran,C=IR"`
+          );
+        } catch (ksErr) {
+          return res.status(500).json({
+            success: false,
+            message: `\u062E\u0637\u0627 \u062F\u0631 \u0633\u0627\u062E\u062A \u062E\u0648\u062F\u06A9\u0627\u0631 \u06A9\u0644\u06CC\u062F \u0627\u0645\u0636\u0627 (keytool): ${ksErr?.message || "\u0627\u0628\u0632\u0627\u0631 keytool/Java \u0631\u0648\u06CC \u0633\u0631\u0648\u0631 \u0646\u0635\u0628 \u0646\u06CC\u0633\u062A."}`
+          });
+        }
+      }
+      const reqProto = req.headers["x-forwarded-proto"]?.split(",")[0]?.trim() || req.protocol || "http";
+      const reqHost = req.get("host") || `127.0.0.1:${process.env.PORT || 3e3}`;
+      const detectedServerUrl = `${reqProto}://${reqHost}`;
+      const targetServerUrl = req.body?.serverUrl && String(req.body.serverUrl).trim() ? String(req.body.serverUrl).trim().replace(/\/+$/, "") : detectedServerUrl;
+      await runExecAsync("rm -rf /tmp/apk_build /tmp/unsigned.apk /tmp/aligned.apk");
+      await runExecAsync(`apktool d -f "${baseApkPath}" -o /tmp/apk_build`);
+      const assetsDir = "/tmp/apk_build/assets";
+      const configJsonPath = path2.join(assetsDir, "config.json");
+      if (!fs2.existsSync(assetsDir)) {
+        fs2.mkdirSync(assetsDir, { recursive: true });
+      }
+      let configData = {};
+      if (fs2.existsSync(configJsonPath)) {
+        try {
+          const rawConfig = fs2.readFileSync(configJsonPath, "utf-8");
+          configData = JSON.parse(rawConfig);
+        } catch {
+          configData = {};
+        }
+      }
+      configData.bridge_server_url = targetServerUrl;
+      fs2.writeFileSync(configJsonPath, JSON.stringify(configData, null, 2), "utf-8");
+      await runExecAsync("apktool b /tmp/apk_build -o /tmp/unsigned.apk");
+      await runExecAsync("zipalign -p -f 4 /tmp/unsigned.apk /tmp/aligned.apk");
+      await runExecAsync(`apksigner sign --ks "${keystorePath}" --ks-pass pass:android /tmp/aligned.apk`);
+      await runExecAsync(`mv -f /tmp/aligned.apk "${customApkPath}"`);
+      await runExecAsync("rm -rf /tmp/apk_build /tmp/unsigned.apk /tmp/aligned.apk").catch(() => {
+      });
+      const stat = fs2.statSync(customApkPath);
+      res.json({
+        success: true,
+        message: "\u0641\u0627\u06CC\u0644 APK \u0627\u062E\u062A\u0635\u0627\u0635\u06CC \u0628\u0627 \u0622\u062F\u0631\u0633 \u0633\u0631\u0648\u0631 \u0634\u0645\u0627 \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u0633\u0627\u062E\u062A\u0647 \u0648 \u0627\u0645\u0636\u0627 \u0634\u062F!",
+        serverUrl: targetServerUrl,
+        downloadUrl: "/api/bridge/download-apk",
+        staticUrl: "/downloads/Cheshmak-Custom.apk",
+        fileSize: stat.size,
+        builtAt: Date.now()
+      });
+    } catch (err) {
+      console.error("APK build error:", err);
+      res.status(500).json({
+        success: false,
+        message: `\u062E\u0637\u0627 \u062F\u0631 \u0633\u0627\u062E\u062A APK \u0627\u062E\u062A\u0635\u0627\u0635\u06CC: ${err?.message || "\u0627\u0637\u0645\u06CC\u0646\u0627\u0646 \u062D\u0627\u0635\u0644 \u06A9\u0646\u06CC\u062F apktool\u060C zipalign \u0648 apksigner \u0631\u0648\u06CC \u0633\u0631\u0648\u0631 \u0646\u0635\u0628 \u0647\u0633\u062A\u0646\u062F."}`
+      });
+    }
+  });
+  app.get("/api/bridge/download-apk", (_req, res) => {
+    if (!fs2.existsSync(customApkPath)) {
+      return res.status(404).json({
+        success: false,
+        message: "\u0641\u0627\u06CC\u0644 Cheshmak-Custom.apk \u0647\u0646\u0648\u0632 \u0633\u0627\u062E\u062A\u0647 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A. \u0627\u0628\u062A\u062F\u0627 \u062F\u06A9\u0645\u0647 \u0633\u0627\u062E\u062A APK \u0631\u0627 \u0628\u0632\u0646\u06CC\u062F."
+      });
+    }
+    res.download(customApkPath, "Cheshmak-Custom.apk");
+  });
   const isProd = process.env.NODE_ENV === "production";
   if (!isProd) {
     const { createServer: createViteServer } = await import("vite");
@@ -3155,7 +3318,52 @@ ${statusText}`;
               <a href="/api/bridge/servers" target="_blank" class="btn btn-outline">\u0644\u06CC\u0633\u062A \u0633\u0631\u0648\u0631\u0647\u0627</a>
               <a href="/api/bridge/wallet/packages" target="_blank" class="btn btn-outline">\u0628\u0633\u062A\u0647\u200C\u0647\u0627\u06CC \u06A9\u06CC\u0641 \u067E\u0648\u0644</a>
             </div>
+
+            <div style="margin-top:24px; padding-top:20px; border-top:1px solid #1e293b;">
+              <div style="font-size:14px; font-weight:700; color:#f8fafc; margin-bottom:8px;">\u0633\u0627\u062E\u062A \u062E\u0648\u062F\u06A9\u0627\u0631 APK \u0627\u062E\u062A\u0635\u0627\u0635\u06CC (Generate Custom APK)</div>
+              <p style="font-size:12px; color:#94a3b8; margin-bottom:12px;">\u0628\u0627 \u06A9\u0644\u06CC\u06A9 \u0631\u0648\u06CC \u062F\u06A9\u0645\u0647 \u0632\u06CC\u0631\u060C \u0622\u062F\u0631\u0633 \u0627\u06CC\u0646 \u0633\u0631\u0648\u0631 \u062F\u0631 \u0641\u0627\u06CC\u0644 config.json \u062A\u0632\u0631\u06CC\u0642 \u0634\u062F\u0647 \u0648 \u0641\u0627\u06CC\u0644 \u0627\u0646\u062F\u0631\u0648\u06CC\u062F \u0627\u062E\u062A\u0635\u0627\u0635\u06CC \u0627\u0645\u0636\u0627 \u0645\u06CC\u200C\u0634\u0648\u062F.</p>
+              <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+                <button id="buildApkBtn" onclick="buildCustomApk()" class="btn" style="background:#0061FF;">\u0633\u0627\u062E\u062A APK \u0627\u062E\u062A\u0635\u0627\u0635\u06CC (Generate Custom APK)</button>
+                <a id="downloadApkBtn" href="/api/bridge/download-apk" class="btn" style="background:#10b981; display:none;">\u062F\u0627\u0646\u0644\u0648\u062F APK \u0627\u062E\u062A\u0635\u0627\u0635\u06CC (Download Custom APK)</a>
+              </div>
+              <div id="apkBuildMsg" style="font-size:12px; margin-top:10px; color:#38bdf8;"></div>
+            </div>
           </div>
+          <script>
+            async function buildCustomApk() {
+              const btn = document.getElementById('buildApkBtn');
+              const dl = document.getElementById('downloadApkBtn');
+              const msg = document.getElementById('apkBuildMsg');
+              btn.disabled = true;
+              btn.innerText = '\u062F\u0631 \u062D\u0627\u0644 \u0633\u0627\u062E\u062A APK... (\u06F1\u06F5 \u062A\u0627 \u06F3\u06F0 \u062B\u0627\u0646\u06CC\u0647)';
+              msg.style.color = '#38bdf8';
+              msg.innerText = '\u062F\u0631 \u062D\u0627\u0644 \u062F\u06CC\u06A9\u062F \u0648 \u0627\u0645\u0636\u0627\u06CC \u0641\u0627\u06CC\u0644 \u0628\u0627 \u0622\u062F\u0631\u0633 \u0633\u0631\u0648\u0631 \u0641\u0639\u0644\u06CC...';
+              dl.style.display = 'none';
+              try {
+                const res = await fetch('/api/bridge/admin/build-apk', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ serverUrl: window.location.origin })
+                });
+                const data = await res.json();
+                if (data.success) {
+                  msg.style.color = '#4ade80';
+                  msg.innerText = '\u2705 ' + data.message;
+                  dl.href = data.downloadUrl || '/api/bridge/download-apk';
+                  dl.style.display = 'inline-block';
+                } else {
+                  msg.style.color = '#fb7185';
+                  msg.innerText = '\u274C ' + (data.message || '\u062E\u0637\u0627 \u062F\u0631 \u0633\u0627\u062E\u062A APK');
+                }
+              } catch (e) {
+                msg.style.color = '#fb7185';
+                msg.innerText = '\u274C \u062E\u0637\u0627\u06CC \u0627\u0631\u062A\u0628\u0627\u0637 \u0628\u0627 \u0633\u0631\u0648\u0631';
+              } finally {
+                btn.disabled = false;
+                btn.innerText = '\u0633\u0627\u062E\u062A APK \u0627\u062E\u062A\u0635\u0627\u0635\u06CC (Generate Custom APK)';
+              }
+            }
+          </script>
         </body>
         </html>
       `);

@@ -59,14 +59,16 @@ esac
 
 echo -e "${BLUE}[1/6] System-amel shenasaee shod: ${GREEN}${OS_TYPE}${PLAIN}"
 
-# 3. Update repositories and install base packages
-echo -e "${BLUE}[2/6] Dar hale nasbe bastehaye paye (git, curl, wget, tar, build-essential)...${PLAIN}"
+# 3. Update repositories and install base packages + Android APK Builder tools
+echo -e "${BLUE}[2/6] Dar hale nasbe bastehaye paye va abzarhaye sakhte APK (apktool, zipalign, apksigner)...${PLAIN}"
 if [[ "$PKG_MGR" == "apt-get" ]]; then
     apt-get update -y > /dev/null 2>&1
     apt-get install -y curl wget git tar socat systemd net-tools build-essential > /dev/null 2>&1
+    apt-get install -y default-jre apktool zipalign apksigner > /dev/null 2>&1 || true
 elif [[ "$PKG_MGR" == "yum" || "$PKG_MGR" == "dnf" ]]; then
     $PKG_MGR update -y > /dev/null 2>&1
     $PKG_MGR install -y curl wget git tar socat systemd net-tools gcc gcc-c++ make > /dev/null 2>&1
+    $PKG_MGR install -y java-17-openjdk-headless apktool android-tools > /dev/null 2>&1 || true
 fi
 
 # 4. Check & Install Node.js 20+ LTS

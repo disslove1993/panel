@@ -3,7 +3,7 @@ import http from 'http';
 import https from 'https';
 import path from 'path';
 import fs from 'fs';
-import { execSync } from 'child_process';
+import { exec, execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { bridgeStore, WALLET_PACKAGES } from './bridgeStore';
 import {
@@ -616,16 +616,43 @@ async function startServer() {
   app.use(express.json({ limit: '25mb' }));
   app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
-  // Ensure public uploads receipts directory exists
+  // Ensure public uploads receipts, apk, and downloads directories exist
   const receiptsDir = path.resolve(__dirname, 'public/uploads/receipts');
+  const apkDir = path.resolve(__dirname, 'public/apk');
+  const downloadsDir = path.resolve(__dirname, 'public/downloads');
+  const keystorePath = path.resolve(apkDir, 'my-upload-key.jks');
+  const baseApkPath = path.resolve(apkDir, 'base.apk');
+  const customApkPath = path.resolve(downloadsDir, 'Cheshmak-Custom.apk');
+
   try {
     if (!fs.existsSync(receiptsDir)) {
       fs.mkdirSync(receiptsDir, { recursive: true });
     }
+    if (!fs.existsSync(apkDir)) {
+      fs.mkdirSync(apkDir, { recursive: true });
+    }
+    if (!fs.existsSync(downloadsDir)) {
+      fs.mkdirSync(downloadsDir, { recursive: true });
+    }
   } catch (err) {
-    console.warn('Could not create receipts dir:', err);
+    console.warn('Could not create required public directories:', err);
   }
+
+  // Auto-generate Android signing keystore if missing
+  if (!fs.existsSync(keystorePath)) {
+    try {
+      execSync(
+        `keytool -genkeypair -v -keystore "${keystorePath}" -storepass android -alias upload -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=NovaShield,OU=Mobile,O=Nova,L=Tehran,S=Tehran,C=IR"`,
+        { stdio: 'pipe' }
+      );
+      console.log('Generated Android signing keystore at:', keystorePath);
+    } catch (err: any) {
+      console.warn('Could not auto-generate keystore on startup (keytool may not be installed yet):', err?.message || err);
+    }
+  }
+
   app.use('/uploads', express.static(path.resolve(__dirname, 'public/uploads')));
+  app.use('/downloads', express.static(downloadsDir));
 
   // Direct Install Script for VPS
   app.get('/install.sh', (_req, res) => {
@@ -2636,6 +2663,175 @@ async function startServer() {
     }
   });
 
+  // ============================================================================
+  // 32. AUTOMATED IN-PANEL APK BUILDER (White-Label Repackaging)
+  // ============================================================================
+  const runExecAsync = (cmd: string): Promise<{ stdout: string; stderr: string }> => {
+    return new Promise((resolve, reject) => {
+      exec(cmd, { maxBuffer: 25 * 1024 * 1024 }, (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(stderr?.trim() || stdout?.trim() || error.message));
+          return;
+        }
+        resolve({ stdout, stderr });
+      });
+    });
+  };
+
+  // Check APK Builder environment status
+  app.get('/api/bridge/admin/apk-status', (_req, res) => {
+    const hasBaseApk = fs.existsSync(baseApkPath);
+    const hasKeystore = fs.existsSync(keystorePath);
+    const hasCustomApk = fs.existsSync(customApkPath);
+
+    let baseApkSize = 0;
+    let customApkSize = 0;
+    let customApkUpdatedAt = 0;
+
+    try {
+      if (hasBaseApk) baseApkSize = fs.statSync(baseApkPath).size;
+      if (hasCustomApk) {
+        const st = fs.statSync(customApkPath);
+        customApkSize = st.size;
+        customApkUpdatedAt = st.mtimeMs;
+      }
+    } catch {}
+
+    res.json({
+      success: true,
+      hasBaseApk,
+      baseApkSize,
+      hasKeystore,
+      hasCustomApk,
+      customApkSize,
+      customApkUpdatedAt,
+      downloadUrl: '/api/bridge/download-apk',
+      staticUrl: '/downloads/Cheshmak-Custom.apk',
+    });
+  });
+
+  // Optional: Direct binary upload for base.apk from Web Panel
+  app.post(
+    '/api/bridge/admin/upload-base-apk',
+    express.raw({ type: ['application/octet-stream', 'application/vnd.android.package-archive'], limit: '200mb' }),
+    (req, res) => {
+      try {
+        if (!Buffer.isBuffer(req.body) || req.body.length < 100) {
+          return res.status(400).json({ success: false, message: 'فایل APK ارسالی معتبر نیست یا خالی است.' });
+        }
+        if (!fs.existsSync(apkDir)) {
+          fs.mkdirSync(apkDir, { recursive: true });
+        }
+        fs.writeFileSync(baseApkPath, req.body);
+        res.json({
+          success: true,
+          message: 'فایل پایه base.apk با موفقیت در مسیر public/apk/base.apk ذخیره شد.',
+          size: req.body.length,
+        });
+      } catch (err: any) {
+        res.status(500).json({ success: false, message: err?.message || 'خطا در ذخیره فایل base.apk' });
+      }
+    }
+  );
+
+  // Build Customized White-Label APK
+  app.post('/api/bridge/admin/build-apk', async (req, res) => {
+    try {
+      if (!fs.existsSync(baseApkPath)) {
+        return res.status(404).json({
+          success: false,
+          code: 'BASE_APK_MISSING',
+          message: 'فایل پایه base.apk در پوشه public/apk یافت نشد. لطفاً ابتدا فایل base.apk را آپلود یا در سرور قرار دهید.',
+        });
+      }
+
+      if (!fs.existsSync(downloadsDir)) {
+        fs.mkdirSync(downloadsDir, { recursive: true });
+      }
+
+      // Ensure keystore exists before signing
+      if (!fs.existsSync(keystorePath)) {
+        try {
+          await runExecAsync(
+            `keytool -genkeypair -v -keystore "${keystorePath}" -storepass android -alias upload -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=NovaShield,OU=Mobile,O=Nova,L=Tehran,S=Tehran,C=IR"`
+          );
+        } catch (ksErr: any) {
+          return res.status(500).json({
+            success: false,
+            message: `خطا در ساخت خودکار کلید امضا (keytool): ${ksErr?.message || 'ابزار keytool/Java روی سرور نصب نیست.'}`,
+          });
+        }
+      }
+
+      // Determine current Server URL
+      const reqProto = (req.headers['x-forwarded-proto'] as string)?.split(',')[0]?.trim() || req.protocol || 'http';
+      const reqHost = req.get('host') || `127.0.0.1:${process.env.PORT || 3000}`;
+      const detectedServerUrl = `${reqProto}://${reqHost}`;
+      const targetServerUrl =
+        req.body?.serverUrl && String(req.body.serverUrl).trim()
+          ? String(req.body.serverUrl).trim().replace(/\/+$/, '')
+          : detectedServerUrl;
+
+      // 1. Clean temp folders & Decode base.apk
+      await runExecAsync('rm -rf /tmp/apk_build /tmp/unsigned.apk /tmp/aligned.apk');
+      await runExecAsync(`apktool d -f "${baseApkPath}" -o /tmp/apk_build`);
+
+      // 2. Inject Server URL into /tmp/apk_build/assets/config.json
+      const assetsDir = '/tmp/apk_build/assets';
+      const configJsonPath = path.join(assetsDir, 'config.json');
+      if (!fs.existsSync(assetsDir)) {
+        fs.mkdirSync(assetsDir, { recursive: true });
+      }
+
+      let configData: Record<string, any> = {};
+      if (fs.existsSync(configJsonPath)) {
+        try {
+          const rawConfig = fs.readFileSync(configJsonPath, 'utf-8');
+          configData = JSON.parse(rawConfig);
+        } catch {
+          configData = {};
+        }
+      }
+      configData.bridge_server_url = targetServerUrl;
+      fs.writeFileSync(configJsonPath, JSON.stringify(configData, null, 2), 'utf-8');
+
+      // 3. Rebuild, Zipalign, Sign, and Move to public/downloads/Cheshmak-Custom.apk
+      await runExecAsync('apktool b /tmp/apk_build -o /tmp/unsigned.apk');
+      await runExecAsync('zipalign -p -f 4 /tmp/unsigned.apk /tmp/aligned.apk');
+      await runExecAsync(`apksigner sign --ks "${keystorePath}" --ks-pass pass:android /tmp/aligned.apk`);
+      await runExecAsync(`mv -f /tmp/aligned.apk "${customApkPath}"`);
+      await runExecAsync('rm -rf /tmp/apk_build /tmp/unsigned.apk /tmp/aligned.apk').catch(() => {});
+
+      const stat = fs.statSync(customApkPath);
+      res.json({
+        success: true,
+        message: 'فایل APK اختصاصی با آدرس سرور شما با موفقیت ساخته و امضا شد!',
+        serverUrl: targetServerUrl,
+        downloadUrl: '/api/bridge/download-apk',
+        staticUrl: '/downloads/Cheshmak-Custom.apk',
+        fileSize: stat.size,
+        builtAt: Date.now(),
+      });
+    } catch (err: any) {
+      console.error('APK build error:', err);
+      res.status(500).json({
+        success: false,
+        message: `خطا در ساخت APK اختصاصی: ${err?.message || 'اطمینان حاصل کنید apktool، zipalign و apksigner روی سرور نصب هستند.'}`,
+      });
+    }
+  });
+
+  // Direct download endpoint for Cheshmak-Custom.apk
+  app.get('/api/bridge/download-apk', (_req, res) => {
+    if (!fs.existsSync(customApkPath)) {
+      return res.status(404).json({
+        success: false,
+        message: 'فایل Cheshmak-Custom.apk هنوز ساخته نشده است. ابتدا دکمه ساخت APK را بزنید.',
+      });
+    }
+    res.download(customApkPath, 'Cheshmak-Custom.apk');
+  });
+
   const isProd = process.env.NODE_ENV === 'production';
 
   if (!isProd) {
@@ -2712,7 +2908,52 @@ async function startServer() {
               <a href="/api/bridge/servers" target="_blank" class="btn btn-outline">لیست سرورها</a>
               <a href="/api/bridge/wallet/packages" target="_blank" class="btn btn-outline">بسته‌های کیف پول</a>
             </div>
+
+            <div style="margin-top:24px; padding-top:20px; border-top:1px solid #1e293b;">
+              <div style="font-size:14px; font-weight:700; color:#f8fafc; margin-bottom:8px;">ساخت خودکار APK اختصاصی (Generate Custom APK)</div>
+              <p style="font-size:12px; color:#94a3b8; margin-bottom:12px;">با کلیک روی دکمه زیر، آدرس این سرور در فایل config.json تزریق شده و فایل اندروید اختصاصی امضا می‌شود.</p>
+              <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+                <button id="buildApkBtn" onclick="buildCustomApk()" class="btn" style="background:#0061FF;">ساخت APK اختصاصی (Generate Custom APK)</button>
+                <a id="downloadApkBtn" href="/api/bridge/download-apk" class="btn" style="background:#10b981; display:none;">دانلود APK اختصاصی (Download Custom APK)</a>
+              </div>
+              <div id="apkBuildMsg" style="font-size:12px; margin-top:10px; color:#38bdf8;"></div>
+            </div>
           </div>
+          <script>
+            async function buildCustomApk() {
+              const btn = document.getElementById('buildApkBtn');
+              const dl = document.getElementById('downloadApkBtn');
+              const msg = document.getElementById('apkBuildMsg');
+              btn.disabled = true;
+              btn.innerText = 'در حال ساخت APK... (۱۵ تا ۳۰ ثانیه)';
+              msg.style.color = '#38bdf8';
+              msg.innerText = 'در حال دیکد و امضای فایل با آدرس سرور فعلی...';
+              dl.style.display = 'none';
+              try {
+                const res = await fetch('/api/bridge/admin/build-apk', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ serverUrl: window.location.origin })
+                });
+                const data = await res.json();
+                if (data.success) {
+                  msg.style.color = '#4ade80';
+                  msg.innerText = '✅ ' + data.message;
+                  dl.href = data.downloadUrl || '/api/bridge/download-apk';
+                  dl.style.display = 'inline-block';
+                } else {
+                  msg.style.color = '#fb7185';
+                  msg.innerText = '❌ ' + (data.message || 'خطا در ساخت APK');
+                }
+              } catch (e) {
+                msg.style.color = '#fb7185';
+                msg.innerText = '❌ خطای ارتباط با سرور';
+              } finally {
+                btn.disabled = false;
+                btn.innerText = 'ساخت APK اختصاصی (Generate Custom APK)';
+              }
+            }
+          </script>
         </body>
         </html>
       `);

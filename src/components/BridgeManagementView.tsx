@@ -40,6 +40,8 @@ import {
   Globe,
   Search,
   BookOpen,
+  Download,
+  Package,
 } from 'lucide-react';
 import { BridgePlan, BridgeServerItem, BridgeUser, BridgeCardTransferOrder } from '../types/bridge';
 import { formatBytes } from '../utils/sanaeiHelpers';
@@ -49,7 +51,7 @@ interface BridgeManagementViewProps {
 }
 
 export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRefreshPanel }) => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'plans' | 'users' | 'wallet' | 'docs' | 'vps' | 'simulator'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'plans' | 'users' | 'wallet' | 'docs' | 'vps' | 'apk' | 'simulator'>('dashboard');
   const [users, setUsers] = useState<BridgeUser[]>([]);
   const [plans, setPlans] = useState<BridgePlan[]>([]);
   const [servers, setServers] = useState<BridgeServerItem[]>([]);
@@ -141,6 +143,30 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
     typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
   );
   const [serverPingStatus, setServerPingStatus] = useState<'idle' | 'testing' | 'success' | 'failed'>('idle');
+
+  // Automated In-Panel APK Builder State
+  const [apkStatus, setApkStatus] = useState<{
+    hasBaseApk: boolean;
+    baseApkSize: number;
+    hasKeystore: boolean;
+    hasCustomApk: boolean;
+    customApkSize: number;
+    customApkUpdatedAt: number;
+    downloadUrl: string;
+    staticUrl: string;
+  } | null>(null);
+  const [apkServerUrlInput, setApkServerUrlInput] = useState(
+    typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
+  );
+  const [isBuildingApk, setIsBuildingApk] = useState(false);
+  const [isUploadingBaseApk, setIsUploadingBaseApk] = useState(false);
+  const [apkBuildError, setApkBuildError] = useState<string | null>(null);
+  const [apkBuildSuccess, setApkBuildSuccess] = useState<{
+    message: string;
+    downloadUrl: string;
+    serverUrl: string;
+    fileSize: number;
+  } | null>(null);
 
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
 
@@ -834,11 +860,82 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
     }
   };
 
+  const fetchApkStatus = async () => {
+    try {
+      const res = await fetch('/api/bridge/admin/apk-status');
+      const data = await safeParseJson(res);
+      if (data && data.success) {
+        setApkStatus(data);
+      }
+    } catch (err) {
+      console.error('Error fetching APK status:', err);
+    }
+  };
+
+  const handleUploadBaseApk = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingBaseApk(true);
+    setApkBuildError(null);
+    try {
+      const res = await fetch('/api/bridge/admin/upload-base-apk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: file,
+      });
+      const data = await safeParseJson(res);
+      if (data && data.success) {
+        await fetchApkStatus();
+      } else {
+        setApkBuildError(data?.message || 'خطا در آپلود فایل base.apk');
+      }
+    } catch (err: any) {
+      setApkBuildError(err?.message || 'خطا در آپلود فایل پایه APK');
+    } finally {
+      setIsUploadingBaseApk(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleBuildCustomApk = async () => {
+    setIsBuildingApk(true);
+    setApkBuildError(null);
+    setApkBuildSuccess(null);
+    try {
+      const res = await fetch('/api/bridge/admin/build-apk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          serverUrl: apkServerUrlInput.trim() || baseUrl,
+        }),
+      });
+      const data = await safeParseJson(res);
+      if (data && data.success) {
+        setApkBuildSuccess({
+          message: data.message,
+          downloadUrl: data.downloadUrl || '/api/bridge/download-apk',
+          serverUrl: data.serverUrl || apkServerUrlInput,
+          fileSize: data.fileSize || 0,
+        });
+        await fetchApkStatus();
+      } else {
+        setApkBuildError(
+          data?.message || 'فایل پایه base.apk در مسیر public/apk یافت نشد یا ابزارهای بیلد روی سرور نصب نیستند.'
+        );
+      }
+    } catch (err: any) {
+      setApkBuildError(err?.message || 'خطا در ارتباط با سرور هنگام ساخت APK');
+    } finally {
+      setIsBuildingApk(false);
+    }
+  };
+
   useEffect(() => {
     fetchBridgeData();
     fetchGiftCodes();
     fetchPaymentPackages();
     fetchCardOrders();
+    fetchApkStatus();
   }, []);
 
 
@@ -1110,6 +1207,18 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
             >
               <Terminal className="w-4 h-4" />
               <span>نصب VPS</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('apk')}
+              className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-2 whitespace-nowrap shrink-0 ${
+                activeTab === 'apk'
+                  ? 'bg-gradient-to-l from-[#0061FF] to-[#2B7FFF] text-white shadow-md shadow-blue-500/25'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-[#0061FF] hover:bg-white dark:hover:bg-slate-900'
+              }`}
+            >
+              <Package className="w-4 h-4" />
+              <span>ساخت APK اختصاصی</span>
             </button>
             <button
               type="button"
@@ -1994,6 +2103,191 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                 <div className="text-purple-500 font-bold" dir="ltr">systemctl status sanaei-bridge</div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB: AUTOMATED IN-PANEL APK BUILDER (WHITE-LABEL REPACKAGING) */}
+      {activeTab === 'apk' && (
+        <div className="space-y-6">
+          {/* Top Edaca Status Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="p-5 bg-white dark:bg-slate-900 border border-[#E6EDFF] dark:border-slate-800 rounded-2xl shadow-sm shadow-blue-500/5 space-y-3">
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#0061FF] to-[#3B82F6] flex items-center justify-center text-white shadow-md shadow-blue-500/25 shrink-0">
+                  <Package className="w-6 h-6" />
+                </div>
+                <div>
+                  <span className="text-xs font-medium text-slate-500 dark:text-slate-400 block">فایل پایه اپلیکیشن (base.apk)</span>
+                  <div className="text-lg font-extrabold text-slate-900 dark:text-white mt-0.5">
+                    {apkStatus?.hasBaseApk ? 'آماده بیلد ✅' : 'یافت نشد ⚠️'}
+                  </div>
+                </div>
+              </div>
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+                <span className="text-slate-500 font-mono" dir="ltr">public/apk/base.apk</span>
+                <span className="font-mono font-bold text-[#0061FF]">
+                  {apkStatus?.hasBaseApk ? formatBytes(apkStatus.baseApkSize) : 'آپلود نشده'}
+                </span>
+              </div>
+            </div>
+
+            <div className="p-5 bg-white dark:bg-slate-900 border border-[#E6EDFF] dark:border-slate-800 rounded-2xl shadow-sm shadow-blue-500/5 space-y-3">
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#0061FF] to-[#3B82F6] flex items-center justify-center text-white shadow-md shadow-blue-500/25 shrink-0">
+                  <Shield className="w-6 h-6" />
+                </div>
+                <div>
+                  <span className="text-xs font-medium text-slate-500 dark:text-slate-400 block">کلید امضای دیجیتال (Keystore)</span>
+                  <div className="text-lg font-extrabold text-slate-900 dark:text-white mt-0.5">
+                    {apkStatus?.hasKeystore ? 'تولید و آماده ✅' : 'تولید خودکار هنگام بیلد'}
+                  </div>
+                </div>
+              </div>
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+                <span className="text-slate-500 font-mono" dir="ltr">my-upload-key.jks</span>
+                <span className="font-bold text-emerald-500">RSA 2048-bit</span>
+              </div>
+            </div>
+
+            <div className="p-5 bg-white dark:bg-slate-900 border border-[#E6EDFF] dark:border-slate-800 rounded-2xl shadow-sm shadow-blue-500/5 space-y-3">
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#0061FF] to-[#3B82F6] flex items-center justify-center text-white shadow-md shadow-blue-500/25 shrink-0">
+                  <Download className="w-6 h-6" />
+                </div>
+                <div>
+                  <span className="text-xs font-medium text-slate-500 dark:text-slate-400 block">فایل نهایی اختصاصی</span>
+                  <div className="text-lg font-extrabold text-slate-900 dark:text-white mt-0.5">
+                    {apkStatus?.hasCustomApk ? 'آماده دانلود ✅' : 'هنوز ساخته نشده'}
+                  </div>
+                </div>
+              </div>
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+                <span className="text-slate-500 font-mono" dir="ltr">Cheshmak-Custom.apk</span>
+                <span className="font-mono font-bold text-[#0061FF]">
+                  {apkStatus?.hasCustomApk ? formatBytes(apkStatus.customApkSize) : '-'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Main Generate Custom APK Card */}
+          <div className="bg-white dark:bg-slate-900 border border-[#E6EDFF] dark:border-slate-800 rounded-2xl p-6 shadow-[0_4px_20px_-4px_rgba(0,97,255,0.06)] space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+              <div className="flex items-start gap-3">
+                <div className="w-11 h-11 rounded-xl bg-[#EEF4FF] dark:bg-blue-950/60 border border-[#CFE0FF] dark:border-blue-800 flex items-center justify-center text-[#0061FF] dark:text-blue-400 shrink-0">
+                  <Smartphone className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    ساخت خودکار نسخه اختصاصی اندروید (Generate Custom APK)
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    با یک کلیک، آدرس سرور فعلی شما در فایل <code className="font-mono text-[#0061FF]">assets/config.json</code> داخل اپلیکیشن تزریق شده، پکیج دوباره بیلد و امضا می‌شود تا کاربران مستقیماً به سرور خودتان متصل شوند.
+                  </p>
+                </div>
+              </div>
+
+              <label className="cursor-pointer px-4 py-2.5 bg-[#EEF4FF] hover:bg-blue-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-[#0061FF] dark:text-blue-400 border border-[#CFE0FF] dark:border-slate-700 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap shrink-0">
+                <Upload className="w-4 h-4" />
+                <span>{isUploadingBaseApk ? 'در حال آپلود base.apk...' : 'آپلود فایل پایه (base.apk)'}</span>
+                <input
+                  type="file"
+                  accept=".apk"
+                  onChange={handleUploadBaseApk}
+                  disabled={isUploadingBaseApk}
+                  className="hidden"
+                />
+              </label>
+            </div>
+
+            {/* Warning if base.apk is missing */}
+            {apkStatus && !apkStatus.hasBaseApk && (
+              <div className="p-4 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 rounded-xl flex items-start gap-3 text-xs text-amber-800 dark:text-amber-200">
+                <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                <div className="space-y-1 leading-relaxed">
+                  <div className="font-bold">فایل پایه <code className="font-mono">base.apk</code> هنوز روی سرور قرار نگرفته است!</div>
+                  <div>
+                    برای ساخت خروجی اختصاصی، ابتدا فایل خام اپلیکیشن را از دکمه <strong>«آپلود فایل پایه (base.apk)»</strong> در بالا آپلود کنید یا از طریق ترمینال در مسیر <code className="font-mono bg-black/10 dark:bg-black/40 px-1.5 py-0.5 rounded" dir="ltr">public/apk/base.apk</code> قرار دهید.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Server URL Injection Field */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-end">
+              <div className="lg:col-span-7 space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
+                  آدرس سرور پل ارتباطی جهت تزریق در اپلیکیشن (<code className="font-mono text-[#0061FF]">bridge_server_url</code>):
+                </label>
+                <input
+                  type="text"
+                  dir="ltr"
+                  value={apkServerUrlInput}
+                  onChange={(e) => setApkServerUrlInput(e.target.value)}
+                  placeholder="https://your-domain.com"
+                  className="w-full px-4 py-3 bg-[#F4F7FE] dark:bg-slate-950 border border-[#DCE6FF] dark:border-slate-800 rounded-xl text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#0061FF]"
+                />
+              </div>
+
+              <div className="lg:col-span-5 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  disabled={isBuildingApk}
+                  onClick={handleBuildCustomApk}
+                  className="flex-1 py-3 px-5 bg-gradient-to-l from-[#0061FF] to-[#2B7FFF] hover:from-[#0052D9] hover:to-[#1E6CEB] disabled:opacity-60 text-white font-bold text-xs rounded-xl shadow-lg shadow-blue-500/25 transition-all flex items-center justify-center gap-2 whitespace-nowrap"
+                >
+                  {isBuildingApk ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>در حال ساخت و امضای APK... (۱۵ تا ۳۰ ثانیه)</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4" />
+                      <span>ساخت فایل APK اختصاصی (Generate Custom APK)</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Error Display */}
+            {apkBuildError && (
+              <div className="p-4 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800/50 rounded-xl flex items-start gap-3 text-xs text-rose-700 dark:text-rose-300">
+                <AlertCircle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
+                <div className="leading-relaxed">{apkBuildError}</div>
+              </div>
+            )}
+
+            {/* Success & Direct Download Section */}
+            {(apkBuildSuccess || apkStatus?.hasCustomApk) && (
+              <div className="p-5 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center shrink-0 shadow-md shadow-emerald-500/25">
+                    <CheckCircle2 className="w-5 h-5" />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="text-sm font-bold text-emerald-900 dark:text-emerald-300">
+                      {apkBuildSuccess ? apkBuildSuccess.message : 'فایل اختصاصی Cheshmak-Custom.apk آماده دانلود است'}
+                    </div>
+                    <div className="text-xs text-emerald-700 dark:text-emerald-400/80 font-mono" dir="ltr">
+                      Cheshmak-Custom.apk · {formatBytes(apkBuildSuccess?.fileSize || apkStatus?.customApkSize || 0)}
+                      {apkBuildSuccess?.serverUrl ? ` · ${apkBuildSuccess.serverUrl}` : ''}
+                    </div>
+                  </div>
+                </div>
+
+                <a
+                  href={apkBuildSuccess?.downloadUrl || '/api/bridge/download-apk'}
+                  download="Cheshmak-Custom.apk"
+                  className="px-5 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-emerald-600/25 transition-all flex items-center justify-center gap-2 whitespace-nowrap shrink-0"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>دانلود APK اختصاصی (Download Custom APK)</span>
+                </a>
+              </div>
+            )}
           </div>
         </div>
       )}
