@@ -62,7 +62,7 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
   const [newGiftTokens, setNewGiftTokens] = useState('1000');
   const [newGiftMaxUses, setNewGiftMaxUses] = useState('500');
   const [giftStatusMsg, setGiftStatusMsg] = useState<string | null>(null);
-  const [zibalMerchant, setZibalMerchant] = useState('68b314a9a45c720017ff86cb');
+  const [zibalMerchant, setZibalMerchant] = useState('');
   const [zibalCallbackUrl, setZibalCallbackUrl] = useState('');
   const [zibalEnabled, setZibalEnabled] = useState(true);
   const [paymentTesting, setPaymentTesting] = useState(false);
@@ -81,9 +81,9 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
 
   // Card to Card & Telegram Bot State
   const [cardToCardEnabled, setCardToCardEnabled] = useState(true);
-  const [bankCardNumber, setBankCardNumber] = useState('6037997512345678');
-  const [bankCardOwner, setBankCardOwner] = useState('مهدی حاجی محمدی');
-  const [bankName, setBankName] = useState('بانک ملی ایران');
+  const [bankCardNumber, setBankCardNumber] = useState('');
+  const [bankCardOwner, setBankCardOwner] = useState('');
+  const [bankName, setBankName] = useState('');
   const [telegramBotToken, setTelegramBotToken] = useState('');
   const [telegramAdminChatId, setTelegramAdminChatId] = useState('');
   const [cardOrders, setCardOrders] = useState<BridgeCardTransferOrder[]>([]);
@@ -129,10 +129,12 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
   const [userSearchQuery, setUserSearchQuery] = useState('');
 
   // Dynamic Bridge Server URL Setting for Mobile App
-  const [serverHostInput, setServerHostInput] = useState('http://130.185.121.250:3000');
+  const [serverHostInput, setServerHostInput] = useState(
+    typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000'
+  );
   const [serverPingStatus, setServerPingStatus] = useState<'idle' | 'testing' | 'success' | 'failed'>('idle');
 
-  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://130.185.121.250:3000';
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
 
   const copyToClipboard = (text: string, sectionId: string) => {
     navigator.clipboard.writeText(text);
@@ -161,28 +163,28 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
         if (data.settings?.freeTrialDays !== undefined) {
           setFreeTrialDaysInput(String(data.settings.freeTrialDays));
         }
-        if (data.settings?.zibalMerchant) {
+        if (data.settings?.zibalMerchant !== undefined) {
           setZibalMerchant(data.settings.zibalMerchant);
         }
-        if (data.settings?.zibalCallbackUrl) {
+        if (data.settings?.zibalCallbackUrl !== undefined) {
           setZibalCallbackUrl(data.settings.zibalCallbackUrl);
         }
         if (data.settings?.cardToCardEnabled !== undefined) {
           setCardToCardEnabled(data.settings.cardToCardEnabled);
         }
-        if (data.settings?.bankCardNumber) {
+        if (data.settings?.bankCardNumber !== undefined) {
           setBankCardNumber(data.settings.bankCardNumber);
         }
-        if (data.settings?.bankCardOwner) {
+        if (data.settings?.bankCardOwner !== undefined) {
           setBankCardOwner(data.settings.bankCardOwner);
         }
-        if (data.settings?.bankName) {
+        if (data.settings?.bankName !== undefined) {
           setBankName(data.settings.bankName);
         }
-        if (data.settings?.telegramBotToken) {
+        if (data.settings?.telegramBotToken !== undefined) {
           setTelegramBotToken(data.settings.telegramBotToken);
         }
-        if (data.settings?.telegramAdminChatId) {
+        if (data.settings?.telegramAdminChatId !== undefined) {
           setTelegramAdminChatId(data.settings.telegramAdminChatId);
         }
         const serverPkgs = data.walletPackages || data.settings?.walletPackages;
@@ -812,7 +814,7 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
   • نام کاربری: admin
   • رمز عبور: admin123
 - پس از لاگین مدیر، صفحه‌ای باز شود شامل:
-  • فیلد متنی «آدرس سرور پل ارتباطی (Bridge Server URL)» با مقدار پیش‌فرض: http://130.185.121.250:3000
+  • فیلد متنی «آدرس سرور پل ارتباطی (Bridge Server URL)» با مقدار پیش‌فرض: ${baseUrl}
   • دکمه «تست اتصال به سرور»: با متد GET به مسیر {BASE_URL}/api/bridge/health درخواست بزند و در صورت پاسخ سبز نشان دهد: «اتصال برقرار است ✅»
   • دکمه «ذخیره تنظیمات»: این آدرس را در حافظه ماندگار (AsyncStorage / localStorage) تحت کلید "bridge_server_url" ذخیره کند.
 - تمام بخش‌های اپلیکیشن برای ارسال درخواست‌ها باید از این آدرس پویا استفاده کنند تا اگر در آینده سرور یا دامنه‌ام عوض شد، نیازی به تغییر کد برنامه نباشد.
@@ -877,7 +879,7 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
     "cardToCard": {
       "enabled": true,
       "bankCardNumber": "6037997512345678",
-      "bankCardOwner": "مهدی حاجی محمدی",
+      "bankCardOwner": "نام صاحب کارت",
       "bankName": "بانک ملی ایران"
     }
   }
@@ -2654,7 +2656,7 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                   type="text"
                   value={zibalMerchant}
                   onChange={(e) => setZibalMerchant(e.target.value)}
-                  placeholder="مثلاً 68b314a9a45c720017ff86cb یا zibal برای تست"
+                  placeholder="کد مرچنت زیبال خود را وارد کنید (یا zibal برای تست)"
                   className="px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500 w-72"
                   dir="ltr"
                 />
@@ -2677,15 +2679,6 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                 >
                   سوییچ به درگاه تستی (zibal)
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleUpdateZibalSettings('68b314a9a45c720017ff86cb');
-                  }}
-                  className="px-3 py-1.5 text-xs bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 rounded-lg transition-colors font-medium"
-                >
-                  مرچنت رسمی شما
-                </button>
               </div>
             </div>
 
@@ -2694,13 +2687,13 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center gap-2 text-xs font-bold text-amber-400">
                   <AlertCircle className="w-4 h-4 text-amber-400" />
-                  <span>دلیل خطای «آدرس بازگشت نامعتبر است» و راه‌حل آن:</span>
+                  <span>تنظیم آدرس بازگشت درگاه (Callback URL):</span>
                 </div>
                 <span className="text-[11px] text-slate-400">قانون امنیتی شاپرک / زیبال (کد خطا: 106)</span>
               </div>
 
               <p className="text-xs text-amber-200/90 leading-relaxed">
-                همان‌طور که در پنل زیبال شما مشخص است، دامنه ثبت شده برای این مرچنت <strong>baharak.sbs</strong> می‌باشد. زیبال اجازه نمی‌دهد درخواست پرداخت از دامنه‌ای غیر از دامنه ثبت‌شده ارسال شود، مگر آنکه دامنه در پنل زیبال بروزرسانی شود.
+                توجه: درگاه زیبال فقط به دامنه‌ای که در پنل کاربری زیبال ثبت کرده‌اید اجازه اتصال می‌دهد. در صورت خالی گذاشتن کادر زیر، آدرس سرور فعلی به صورت خودکار استفاده می‌شود.
               </p>
 
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
@@ -2708,7 +2701,7 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                   type="text"
                   value={zibalCallbackUrl}
                   onChange={(e) => setZibalCallbackUrl(e.target.value)}
-                  placeholder="آدرس بازگشت (Callback URL) دلخواه"
+                  placeholder={`${baseUrl}/api/bridge/payment/callback`}
                   className="px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs font-mono text-slate-100 flex-1 focus:outline-none focus:ring-2 focus:ring-amber-500"
                   dir="ltr"
                 />
@@ -2722,25 +2715,14 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
               </div>
 
               <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
-                <span className="text-slate-400 text-[11px]">انتخاب‌های سریع:</span>
+                <span className="text-slate-400 text-[11px]">انتخاب سریع:</span>
                 <button
                   type="button"
-                  onClick={() => handleUpdateZibalSettings(undefined, 'https://baharak.sbs/api/bridge/payment/callback')}
-                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 rounded text-[11px] font-mono transition-colors"
-                >
-                  baharak.sbs (دامنه ثبت شده در پنل زیبال شما)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleUpdateZibalSettings(undefined, 'http://app.wpbaharak.ir:3000/api/bridge/payment/callback')}
+                  onClick={() => handleUpdateZibalSettings(undefined, `${baseUrl}/api/bridge/payment/callback`)}
                   className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-sky-300 rounded text-[11px] font-mono transition-colors"
                 >
-                  app.wpbaharak.ir:3000 (دامنه فعلی سرور)
+                  {baseUrl}/api/bridge/payment/callback (آدرس فعلی پنل)
                 </button>
-              </div>
-
-              <div className="text-[11px] text-slate-400 border-t border-amber-500/20 pt-2">
-                💡 <strong>برای حل دائم با دامنه app.wpbaharak.ir:</strong> کافیست در پنل زیبال (تب <strong>تنظیمات</strong> درگاه) دامنه سایت را از <code className="text-white font-mono">baharak.sbs</code> به <code className="text-white font-mono">app.wpbaharak.ir</code> یا <code className="text-white font-mono">wpbaharak.ir</code> تغییر دهید.
               </div>
             </div>
 
@@ -2988,7 +2970,7 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                   type="text"
                   value={bankCardOwner}
                   onChange={(e) => setBankCardOwner(e.target.value)}
-                  placeholder="مثلاً مهدی حاجی محمدی"
+                  placeholder="مثلاً علی محمدی"
                   className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-purple-500"
                 />
               </div>

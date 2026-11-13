@@ -56,27 +56,23 @@ var DEFAULT_PLANS = [
 var DEFAULT_SETTINGS = {
   apiKey: "bridge_secret_key_2026",
   adminPassword: "admin",
-  defaultInboundId: 4,
-  // Inbound 4 (AI-Cloudflare-CDN)
+  defaultInboundId: 1,
   welcomeTokens: 1e3,
-  // 1000 Tokens given to new users by default (matching the app UI)
   freeTrialTrafficGB: 1,
-  // 1 GB test traffic
   freeTrialDays: 3,
-  // 3 days test period
-  sanaeiPanelUrl: "https://panel.wpbaharak.ir:2053",
+  sanaeiPanelUrl: "",
   sanaeiWebBasePath: "/",
-  sanaeiUsername: "disslove22",
-  sanaeiPassword: "199300",
+  sanaeiUsername: "",
+  sanaeiPassword: "",
   allowInsecure: true,
-  zibalMerchant: "68b314a9a45c720017ff86cb",
+  zibalMerchant: "",
   zibalEnabled: true,
   zibalCallbackUrl: "",
   // Card to Card & Telegram Bot Settings
   cardToCardEnabled: true,
-  bankCardNumber: "6037997512345678",
-  bankCardOwner: "\u0645\u0647\u062F\u06CC \u062D\u0627\u062C\u06CC \u0645\u062D\u0645\u062F\u06CC",
-  bankName: "\u0628\u0627\u0646\u06A9 \u0645\u0644\u06CC \u0627\u06CC\u0631\u0627\u0646",
+  bankCardNumber: "",
+  bankCardOwner: "",
+  bankName: "",
   telegramBotToken: "",
   telegramAdminChatId: "",
   plans: DEFAULT_PLANS,
@@ -676,6 +672,9 @@ function registerSanaeiEngine(engine) {
 async function getActiveSanaeiInbounds() {
   if (!sanaeiEngineRef) return [];
   const settings = bridgeStore.getSettings();
+  if (!settings.sanaeiPanelUrl || !settings.sanaeiPanelUrl.trim()) {
+    return [];
+  }
   try {
     const session = await sanaeiEngineRef.authenticatePanel({
       panelUrl: settings.sanaeiPanelUrl,
@@ -695,6 +694,11 @@ async function provisionClientOnSanaei(params) {
     throw new Error("Sanaei engine not registered on server.");
   }
   const settings = bridgeStore.getSettings();
+  if (!settings.sanaeiPanelUrl || !settings.sanaeiPanelUrl.trim()) {
+    throw new Error(
+      "\u0647\u0646\u0648\u0632 \u0647\u06CC\u0686 \u067E\u0646\u0644 \u062B\u0646\u0627\u06CC\u06CC (3X-UI) \u0628\u0647 \u0633\u06CC\u0633\u062A\u0645 \u0645\u062A\u0635\u0644 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A. \u0644\u0637\u0641\u0627\u064B \u0627\u0628\u062A\u062F\u0627 \u0627\u0632 \u0628\u062E\u0634 \xAB\u0627\u062A\u0635\u0627\u0644 \u067E\u0646\u0644 \u062B\u0646\u0627\u06CC\u06CC \u062C\u062F\u06CC\u062F\xBB \u0645\u0634\u062E\u0635\u0627\u062A \u0633\u0631\u0648\u0631 \u062B\u0646\u0627\u06CC\u06CC \u062E\u0648\u062F \u0631\u0627 \u0648\u0627\u0631\u062F \u06A9\u0646\u06CC\u062F."
+    );
+  }
   const session = await sanaeiEngineRef.authenticatePanel({
     panelUrl: settings.sanaeiPanelUrl,
     webBasePath: settings.sanaeiWebBasePath,
@@ -1349,7 +1353,7 @@ async function startServer() {
   app.get("/source.tar.gz", (_req, res) => {
     try {
       const tarPath = "/tmp/sanaei-bridge-dist.tar.gz";
-      execSync(`tar --exclude='./node_modules' --exclude='./.git' -czf ${tarPath} -C "${__dirname}" .`);
+      execSync(`tar --exclude='./node_modules' --exclude='./.git' --exclude='./bridge_store.json' --exclude='./public/uploads' -czf ${tarPath} -C "${__dirname}" .`);
       res.setHeader("Content-Type", "application/gzip");
       res.setHeader("Content-Disposition", 'attachment; filename="sanaei-bridge.tar.gz"');
       res.setHeader("Cache-Control", "no-cache");
@@ -1376,6 +1380,15 @@ async function startServer() {
         fetchInboundsFromPanel(session, conn.allowInsecure ?? true),
         fetchOnlineClients(session, conn.allowInsecure ?? true)
       ]);
+      if (conn.panelUrl && conn.panelUrl.trim()) {
+        bridgeStore.updateSettings({
+          sanaeiPanelUrl: conn.panelUrl.trim(),
+          sanaeiWebBasePath: (conn.webBasePath || "/").trim(),
+          ...conn.username ? { sanaeiUsername: conn.username.trim() } : {},
+          ...conn.password ? { sanaeiPassword: conn.password } : {},
+          allowInsecure: conn.allowInsecure ?? true
+        });
+      }
       res.json({
         success: true,
         fullBaseUrl: session.fullBaseUrl,
@@ -2249,7 +2262,7 @@ async function startServer() {
         return res.status(404).json({ success: false, message: "\u06A9\u0627\u0631\u0628\u0631 \u0628\u0631\u0627\u06CC \u067E\u0631\u062F\u0627\u062E\u062A \u06CC\u0627\u0641\u062A \u0646\u0634\u062F." });
       }
       const settings = bridgeStore.getSettings();
-      const merchant = settings.zibalMerchant || "68b314a9a45c720017ff86cb";
+      const merchant = (settings.zibalMerchant || "zibal").trim();
       let tokens = 100;
       let amountTomans = 1e4;
       if (packageId) {
@@ -2268,7 +2281,7 @@ async function startServer() {
       }
       const orderId = `ORD_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       const protocol = req.headers["x-forwarded-proto"] || req.protocol || "http";
-      const host = req.get("host") || "130.185.121.250:3000";
+      const host = req.get("host") || "localhost:3000";
       const defaultCallback = `${protocol}://${host}/api/bridge/payment/callback`;
       const callbackUrl = callbackUrlOverride || settings.zibalCallbackUrl || defaultCallback;
       const zibalReqBody = JSON.stringify({
@@ -2302,7 +2315,7 @@ async function startServer() {
           103: "\u062F\u0631\u06AF\u0627\u0647 \u0632\u06CC\u0628\u0627\u0644 \u063A\u06CC\u0631\u0641\u0639\u0627\u0644 \u0627\u0633\u062A \u06CC\u0627 \u0642\u0631\u0627\u0631\u062F\u0627\u062F \u062F\u0631\u06AF\u0627\u0647 \u0627\u0645\u0636\u0627 \u0646\u0634\u062F\u0647 \u0627\u0633\u062A.",
           104: "\u06A9\u062F \u0645\u0631\u0686\u0646\u062A \u0632\u06CC\u0628\u0627\u0644 \u0646\u0627\u0645\u0639\u062A\u0628\u0631 \u0627\u0633\u062A.",
           105: "\u0645\u0628\u0644\u063A \u0633\u0641\u0627\u0631\u0634 \u06A9\u0645\u062A\u0631 \u0627\u0632 \u062D\u062F\u0627\u0642\u0644 \u0645\u062C\u0627\u0632 (\u06F1\u06F0\u06F0\u06F0 \u0631\u06CC\u0627\u0644) \u0627\u0633\u062A.",
-          106: "\u062F\u0627\u0645\u0646\u0647 \u0622\u062F\u0631\u0633 \u0628\u0627\u0632\u06AF\u0634\u062A (Callback URL) \u0628\u0627 \u062F\u0627\u0645\u0646\u0647 \u062B\u0628\u062A \u0634\u062F\u0647 \u062F\u0631 \u067E\u0646\u0644 \u0632\u06CC\u0628\u0627\u0644 \u0634\u0645\u0627 (baharak.sbs) \u0645\u0637\u0627\u0628\u0642\u062A \u0646\u062F\u0627\u0631\u062F. \u0628\u0631\u0627\u06CC \u062D\u0644 \u0622\u0646: \u062F\u0631 \u067E\u0646\u0644 \u0632\u06CC\u0628\u0627\u0644 (\u062A\u0628 \u062A\u0646\u0638\u06CC\u0645\u0627\u062A \u062F\u0631\u06AF\u0627\u0647) \u0622\u062F\u0631\u0633 \u0633\u0627\u06CC\u062A \u0631\u0627 \u0628\u0647 wpbaharak.ir \u06CC\u0627 app.wpbaharak.ir \u062A\u063A\u06CC\u06CC\u0631 \u062F\u0647\u06CC\u062F\u060C \u06CC\u0627 \u062F\u0631 \u06A9\u0627\u062F\u0631 \u0632\u06CC\u0631 \u0622\u062F\u0631\u0633 \u0628\u0627\u0632\u06AF\u0634\u062A \u0631\u0627 \u062A\u0646\u0638\u06CC\u0645 \u06A9\u0646\u06CC\u062F.",
+          106: "\u062F\u0627\u0645\u0646\u0647 \u0622\u062F\u0631\u0633 \u0628\u0627\u0632\u06AF\u0634\u062A (Callback URL) \u0628\u0627 \u062F\u0627\u0645\u0646\u0647 \u062B\u0628\u062A \u0634\u062F\u0647 \u062F\u0631 \u067E\u0646\u0644 \u0632\u06CC\u0628\u0627\u0644 \u0634\u0645\u0627 \u0645\u0637\u0627\u0628\u0642\u062A \u0646\u062F\u0627\u0631\u062F. \u062F\u0631 \u067E\u0646\u0644 \u0632\u06CC\u0628\u0627\u0644 \u062F\u0627\u0645\u0646\u0647 \u0633\u0631\u0648\u0631 \u0641\u0639\u0644\u06CC \u0631\u0627 \u062B\u0628\u062A \u06A9\u0646\u06CC\u062F \u06CC\u0627 \u0622\u062F\u0631\u0633 \u0628\u0627\u0632\u06AF\u0634\u062A \u062F\u0644\u062E\u0648\u0627\u0647 \u0631\u0627 \u062F\u0631 \u062A\u0646\u0638\u06CC\u0645\u0627\u062A \u0648\u0627\u0631\u062F \u0646\u0645\u0627\u06CC\u06CC\u062F.",
           113: "\u0645\u0628\u0644\u063A \u062A\u0631\u0627\u06A9\u0646\u0634 \u0628\u06CC\u0634 \u0627\u0632 \u0633\u0642\u0641 \u0645\u062C\u0627\u0632 \u0627\u0633\u062A.",
           115: "\u0622\u06CC\u200C\u067E\u06CC \u0633\u0631\u0648\u0631 \u062F\u0631 \u067E\u0646\u0644 \u0632\u06CC\u0628\u0627\u0644 \u062B\u0628\u062A \u0646\u0634\u062F\u0647 \u0627\u0633\u062A."
         };
@@ -2346,7 +2359,7 @@ async function startServer() {
       order = bridgeStore.findOrderByTrackId(trackId);
     }
     const settings = bridgeStore.getSettings();
-    const merchant = settings.zibalMerchant || "68b314a9a45c720017ff86cb";
+    const merchant = (settings.zibalMerchant || "zibal").trim();
     let isVerified = false;
     let refNumber = "";
     let cardNumber = "";
@@ -2473,6 +2486,11 @@ async function startServer() {
   });
   app.post("/api/bridge/admin/settings", (req, res) => {
     const {
+      sanaeiPanelUrl,
+      sanaeiWebBasePath,
+      sanaeiUsername,
+      sanaeiPassword,
+      allowInsecure,
       zibalMerchant,
       zibalEnabled,
       zibalCallbackUrl,
@@ -2493,6 +2511,11 @@ async function startServer() {
     const parsedTrialGB = freeTrialTrafficGB !== void 0 ? Math.max(0, Number(freeTrialTrafficGB)) : void 0;
     const parsedTrialDays = freeTrialDays !== void 0 ? Math.max(1, Number(freeTrialDays)) : void 0;
     const updated = bridgeStore.updateSettings({
+      ...sanaeiPanelUrl !== void 0 ? { sanaeiPanelUrl: String(sanaeiPanelUrl).trim() } : {},
+      ...sanaeiWebBasePath !== void 0 ? { sanaeiWebBasePath: String(sanaeiWebBasePath).trim() } : {},
+      ...sanaeiUsername !== void 0 ? { sanaeiUsername: String(sanaeiUsername).trim() } : {},
+      ...sanaeiPassword !== void 0 ? { sanaeiPassword: String(sanaeiPassword) } : {},
+      ...allowInsecure !== void 0 ? { allowInsecure: Boolean(allowInsecure) } : {},
       ...zibalMerchant !== void 0 ? { zibalMerchant: String(zibalMerchant).trim() } : {},
       ...zibalEnabled !== void 0 ? { zibalEnabled: Boolean(zibalEnabled) } : {},
       ...zibalCallbackUrl !== void 0 ? { zibalCallbackUrl: String(zibalCallbackUrl).trim() } : {},
@@ -2532,9 +2555,9 @@ async function startServer() {
       },
       cardToCard: {
         enabled: settings.cardToCardEnabled ?? true,
-        bankCardNumber: settings.bankCardNumber || "6037997512345678",
-        bankCardOwner: settings.bankCardOwner || "\u0645\u0647\u062F\u06CC \u062D\u0627\u062C\u06CC \u0645\u062D\u0645\u062F\u06CC",
-        bankName: settings.bankName || "\u0628\u0627\u0646\u06A9 \u0645\u0644\u06CC \u0627\u06CC\u0631\u0627\u0646"
+        bankCardNumber: settings.bankCardNumber || "",
+        bankCardOwner: settings.bankCardOwner || "",
+        bankName: settings.bankName || ""
       },
       telegramBotConfigured: !!(settings.telegramBotToken && settings.telegramAdminChatId)
     });
@@ -2744,7 +2767,7 @@ ${statusText}`;
           const filePath = path2.resolve(__dirname, "public/uploads/receipts", fileName);
           fs2.writeFileSync(filePath, imgBuffer);
           const proto = req.headers["x-forwarded-proto"] || req.protocol || "http";
-          const host = req.get("host") || "app.wpbaharak.ir:3000";
+          const host = req.get("host") || "localhost:3000";
           receiptImageUrl = `${proto}://${host}/uploads/receipts/${fileName}`;
         } catch (saveErr) {
           console.warn("Could not save receipt image to disk:", saveErr);

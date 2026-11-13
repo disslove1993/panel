@@ -17,10 +17,10 @@ export const PanelConnectionModal: React.FC<PanelConnectionModalProps> = ({
   initialProfile,
 }) => {
   const [tab, setTab] = useState<'live' | 'json'>(initialProfile?.mode === 'json' ? 'json' : 'live');
-  const [name, setName] = useState(initialProfile?.name || 'پنل ثنایی (wpbaharak)');
-  const [panelUrl, setPanelUrl] = useState(initialProfile?.panelUrl || 'https://panel.wpbaharak.ir:2053');
+  const [name, setName] = useState(initialProfile?.name || '');
+  const [panelUrl, setPanelUrl] = useState(initialProfile?.panelUrl || '');
   const [webBasePath, setWebBasePath] = useState(initialProfile?.webBasePath || '/');
-  const [username, setUsername] = useState(initialProfile?.username || 'disslove22');
+  const [username, setUsername] = useState(initialProfile?.username || '');
   const [password, setPassword] = useState(initialProfile?.password || '');
   const [apiToken, setApiToken] = useState(initialProfile?.apiToken || '');
   const [twoFactorCode, setTwoFactorCode] = useState(initialProfile?.twoFactorCode || '');
@@ -31,8 +31,8 @@ export const PanelConnectionModal: React.FC<PanelConnectionModalProps> = ({
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   // JSON Import Tab state
-  const [jsonServerName, setJsonServerName] = useState(initialProfile?.name || 'پنل ثنایی (ورودی دستی JSON)');
-  const [jsonHost, setJsonHost] = useState(initialProfile?.hostname || 'panel.wpbaharak.ir');
+  const [jsonServerName, setJsonServerName] = useState(initialProfile?.name || '');
+  const [jsonHost, setJsonHost] = useState(initialProfile?.hostname || '');
   const [rawJsonText, setRawJsonText] = useState('');
 
   const [isLoading, setIsLoading] = useState(false);
@@ -51,8 +51,19 @@ export const PanelConnectionModal: React.FC<PanelConnectionModalProps> = ({
       setSessionCookie(initialProfile.sessionCookie || '');
       setSubscriptionBaseUrl(initialProfile.subscriptionBaseUrl || '');
       setAllowInsecure(initialProfile.allowInsecure ?? true);
+    } else {
+      setName('');
+      setPanelUrl('');
+      setWebBasePath('/');
+      setUsername('');
+      setPassword('');
+      setApiToken('');
+      setTwoFactorCode('');
+      setSessionCookie('');
+      setSubscriptionBaseUrl('');
+      setAllowInsecure(true);
     }
-  }, [initialProfile]);
+  }, [initialProfile, isOpen]);
 
   if (!isOpen) return null;
 
@@ -254,7 +265,7 @@ export const PanelConnectionModal: React.FC<PanelConnectionModalProps> = ({
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="مثلاً: پنل ثنایی wpbaharak"
+                  placeholder="مثلاً: سرور اصلی آلمان"
                   className="w-full px-3.5 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100 focus:outline-none focus:border-sky-500"
                 />
               </div>
@@ -284,7 +295,7 @@ export const PanelConnectionModal: React.FC<PanelConnectionModalProps> = ({
                 required
                 value={panelUrl}
                 onChange={(e) => setPanelUrl(e.target.value)}
-                placeholder="https://panel.wpbaharak.ir:2053"
+                placeholder="https://panel.yourdomain.com:2053"
                 className="w-full px-3.5 py-2.5 text-sm font-mono bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100 focus:outline-none focus:border-sky-500"
               />
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
@@ -302,7 +313,7 @@ export const PanelConnectionModal: React.FC<PanelConnectionModalProps> = ({
                   dir="ltr"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="disslove22"
+                  placeholder="admin"
                   className="w-full px-3.5 py-2 text-sm font-mono bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100 focus:outline-none focus:border-sky-500"
                 />
               </div>
@@ -393,7 +404,7 @@ export const PanelConnectionModal: React.FC<PanelConnectionModalProps> = ({
                       dir="ltr"
                       value={subscriptionBaseUrl}
                       onChange={(e) => setSubscriptionBaseUrl(e.target.value)}
-                      placeholder="https://panel.wpbaharak.ir:2096/sub/"
+                      placeholder="https://panel.yourdomain.com:2096/sub/"
                       className="w-full px-3 py-1.5 text-xs font-mono bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-md text-slate-900 dark:text-slate-100"
                     />
                   </div>
@@ -466,6 +477,7 @@ export const PanelConnectionModal: React.FC<PanelConnectionModalProps> = ({
                   type="text"
                   value={jsonServerName}
                   onChange={(e) => setJsonServerName(e.target.value)}
+                  placeholder="مثلاً: سرور ثنایی (JSON)"
                   className="w-full px-3.5 py-2 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
                 />
               </div>
@@ -478,7 +490,7 @@ export const PanelConnectionModal: React.FC<PanelConnectionModalProps> = ({
                   dir="ltr"
                   value={jsonHost}
                   onChange={(e) => setJsonHost(e.target.value)}
-                  placeholder="panel.wpbaharak.ir"
+                  placeholder="panel.yourdomain.com"
                   className="w-full px-3.5 py-2 text-sm font-mono bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-lg text-slate-900 dark:text-slate-100"
                 />
               </div>

@@ -668,7 +668,7 @@ async function startServer() {
   app.get('/source.tar.gz', (_req, res) => {
     try {
       const tarPath = '/tmp/sanaei-bridge-dist.tar.gz';
-      execSync(`tar --exclude='./node_modules' --exclude='./.git' -czf ${tarPath} -C "${__dirname}" .`);
+      execSync(`tar --exclude='./node_modules' --exclude='./.git' --exclude='./bridge_store.json' --exclude='./public/uploads' -czf ${tarPath} -C "${__dirname}" .`);
       res.setHeader('Content-Type', 'application/gzip');
       res.setHeader('Content-Disposition', 'attachment; filename="sanaei-bridge.tar.gz"');
       res.setHeader('Cache-Control', 'no-cache');
@@ -699,6 +699,17 @@ async function startServer() {
         fetchInboundsFromPanel(session, conn.allowInsecure ?? true),
         fetchOnlineClients(session, conn.allowInsecure ?? true),
       ]);
+
+      // Automatically save the connected Sanaei panel credentials to Bridge Store for API provisioning
+      if (conn.panelUrl && conn.panelUrl.trim()) {
+        bridgeStore.updateSettings({
+          sanaeiPanelUrl: conn.panelUrl.trim(),
+          sanaeiWebBasePath: (conn.webBasePath || '/').trim(),
+          ...(conn.username ? { sanaeiUsername: conn.username.trim() } : {}),
+          ...(conn.password ? { sanaeiPassword: conn.password } : {}),
+          allowInsecure: conn.allowInsecure ?? true,
+        });
+      }
 
       res.json({
         success: true,
@@ -1723,7 +1734,7 @@ async function startServer() {
       }
 
       const settings = bridgeStore.getSettings();
-      const merchant = settings.zibalMerchant || '68b314a9a45c720017ff86cb';
+      const merchant = (settings.zibalMerchant || 'zibal').trim();
 
       let tokens = 100;
       let amountTomans = 10000;
@@ -1748,7 +1759,7 @@ async function startServer() {
 
       const orderId = `ORD_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
-      const host = req.get('host') || '130.185.121.250:3000';
+      const host = req.get('host') || 'localhost:3000';
       const defaultCallback = `${protocol}://${host}/api/bridge/payment/callback`;
       const callbackUrl = callbackUrlOverride || settings.zibalCallbackUrl || defaultCallback;
 
@@ -1787,7 +1798,7 @@ async function startServer() {
           103: 'درگاه زیبال غیرفعال است یا قرارداد درگاه امضا نشده است.',
           104: 'کد مرچنت زیبال نامعتبر است.',
           105: 'مبلغ سفارش کمتر از حداقل مجاز (۱۰۰۰ ریال) است.',
-          106: 'دامنه آدرس بازگشت (Callback URL) با دامنه ثبت شده در پنل زیبال شما (baharak.sbs) مطابقت ندارد. برای حل آن: در پنل زیبال (تب تنظیمات درگاه) آدرس سایت را به wpbaharak.ir یا app.wpbaharak.ir تغییر دهید، یا در کادر زیر آدرس بازگشت را تنظیم کنید.',
+          106: 'دامنه آدرس بازگشت (Callback URL) با دامنه ثبت شده در پنل زیبال شما مطابقت ندارد. در پنل زیبال دامنه سرور فعلی را ثبت کنید یا آدرس بازگشت دلخواه را در تنظیمات وارد نمایید.',
           113: 'مبلغ تراکنش بیش از سقف مجاز است.',
           115: 'آی‌پی سرور در پنل زیبال ثبت نشده است.',
         };
@@ -1840,7 +1851,7 @@ async function startServer() {
     }
 
     const settings = bridgeStore.getSettings();
-    const merchant = settings.zibalMerchant || '68b314a9a45c720017ff86cb';
+    const merchant = (settings.zibalMerchant || 'zibal').trim();
 
     let isVerified = false;
     let refNumber = '';
@@ -1976,9 +1987,14 @@ async function startServer() {
     });
   });
 
-  // 24. Admin Settings: Update Zibal, Card-to-Card, Telegram, Welcome Tokens, and Free Trial
+  // 24. Admin Settings: Update Zibal, Card-to-Card, Telegram, Sanaei Connection, Welcome Tokens, and Free Trial
   app.post('/api/bridge/admin/settings', (req, res) => {
     const {
+      sanaeiPanelUrl,
+      sanaeiWebBasePath,
+      sanaeiUsername,
+      sanaeiPassword,
+      allowInsecure,
       zibalMerchant,
       zibalEnabled,
       zibalCallbackUrl,
@@ -2001,6 +2017,11 @@ async function startServer() {
     const parsedTrialDays = freeTrialDays !== undefined ? Math.max(1, Number(freeTrialDays)) : undefined;
 
     const updated = bridgeStore.updateSettings({
+      ...(sanaeiPanelUrl !== undefined ? { sanaeiPanelUrl: String(sanaeiPanelUrl).trim() } : {}),
+      ...(sanaeiWebBasePath !== undefined ? { sanaeiWebBasePath: String(sanaeiWebBasePath).trim() } : {}),
+      ...(sanaeiUsername !== undefined ? { sanaeiUsername: String(sanaeiUsername).trim() } : {}),
+      ...(sanaeiPassword !== undefined ? { sanaeiPassword: String(sanaeiPassword) } : {}),
+      ...(allowInsecure !== undefined ? { allowInsecure: Boolean(allowInsecure) } : {}),
       ...(zibalMerchant !== undefined ? { zibalMerchant: String(zibalMerchant).trim() } : {}),
       ...(zibalEnabled !== undefined ? { zibalEnabled: Boolean(zibalEnabled) } : {}),
       ...(zibalCallbackUrl !== undefined ? { zibalCallbackUrl: String(zibalCallbackUrl).trim() } : {}),
@@ -2045,9 +2066,9 @@ async function startServer() {
       },
       cardToCard: {
         enabled: settings.cardToCardEnabled ?? true,
-        bankCardNumber: settings.bankCardNumber || '6037997512345678',
-        bankCardOwner: settings.bankCardOwner || 'مهدی حاجی محمدی',
-        bankName: settings.bankName || 'بانک ملی ایران',
+        bankCardNumber: settings.bankCardNumber || '',
+        bankCardOwner: settings.bankCardOwner || '',
+        bankName: settings.bankName || '',
       },
       telegramBotConfigured: !!(settings.telegramBotToken && settings.telegramAdminChatId),
     });
@@ -2270,7 +2291,7 @@ async function startServer() {
           const filePath = path.resolve(__dirname, 'public/uploads/receipts', fileName);
           fs.writeFileSync(filePath, imgBuffer);
           const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
-          const host = req.get('host') || 'app.wpbaharak.ir:3000';
+          const host = req.get('host') || 'localhost:3000';
           receiptImageUrl = `${proto}://${host}/uploads/receipts/${fileName}`;
         } catch (saveErr) {
           console.warn('Could not save receipt image to disk:', saveErr);

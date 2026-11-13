@@ -152,6 +152,7 @@ else
 fi
 
 cd "$INSTALL_DIR" || exit 1
+rm -f "$INSTALL_DIR/bridge_store.json"
 
 # 6. Ask for Port
 echo ""

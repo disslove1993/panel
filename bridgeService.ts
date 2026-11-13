@@ -19,6 +19,9 @@ export function registerSanaeiEngine(engine: SanaeiBridgeEngine) {
 export async function getActiveSanaeiInbounds(): Promise<any[]> {
   if (!sanaeiEngineRef) return [];
   const settings = bridgeStore.getSettings();
+  if (!settings.sanaeiPanelUrl || !settings.sanaeiPanelUrl.trim()) {
+    return [];
+  }
   try {
     const session = await sanaeiEngineRef.authenticatePanel({
       panelUrl: settings.sanaeiPanelUrl,
@@ -50,6 +53,11 @@ export async function provisionClientOnSanaei(params: {
   }
 
   const settings = bridgeStore.getSettings();
+  if (!settings.sanaeiPanelUrl || !settings.sanaeiPanelUrl.trim()) {
+    throw new Error(
+      'هنوز هیچ پنل ثنایی (3X-UI) به سیستم متصل نشده است. لطفاً ابتدا از بخش «اتصال پنل ثنایی جدید» مشخصات سرور ثنایی خود را وارد کنید.'
+    );
+  }
   const session = await sanaeiEngineRef.authenticatePanel({
     panelUrl: settings.sanaeiPanelUrl,
     webBasePath: settings.sanaeiWebBasePath,

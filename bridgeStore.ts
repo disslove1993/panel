@@ -60,23 +60,23 @@ const DEFAULT_PLANS: BridgePlan[] = [
 const DEFAULT_SETTINGS: BridgeSettings = {
   apiKey: 'bridge_secret_key_2026',
   adminPassword: 'admin',
-  defaultInboundId: 4, // Inbound 4 (AI-Cloudflare-CDN)
-  welcomeTokens: 1000, // 1000 Tokens given to new users by default (matching the app UI)
-  freeTrialTrafficGB: 1, // 1 GB test traffic
-  freeTrialDays: 3, // 3 days test period
-  sanaeiPanelUrl: 'https://panel.wpbaharak.ir:2053',
+  defaultInboundId: 1,
+  welcomeTokens: 1000,
+  freeTrialTrafficGB: 1,
+  freeTrialDays: 3,
+  sanaeiPanelUrl: '',
   sanaeiWebBasePath: '/',
-  sanaeiUsername: 'disslove22',
-  sanaeiPassword: '199300',
+  sanaeiUsername: '',
+  sanaeiPassword: '',
   allowInsecure: true,
-  zibalMerchant: '68b314a9a45c720017ff86cb',
+  zibalMerchant: '',
   zibalEnabled: true,
   zibalCallbackUrl: '',
   // Card to Card & Telegram Bot Settings
   cardToCardEnabled: true,
-  bankCardNumber: '6037997512345678',
-  bankCardOwner: 'مهدی حاجی محمدی',
-  bankName: 'بانک ملی ایران',
+  bankCardNumber: '',
+  bankCardOwner: '',
+  bankName: '',
   telegramBotToken: '',
   telegramAdminChatId: '',
   plans: DEFAULT_PLANS,

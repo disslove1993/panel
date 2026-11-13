@@ -45,8 +45,22 @@ import { ClientConfigModal } from './components/ClientConfigModal';
 import { InboundDetailsModal } from './components/InboundDetailsModal';
 import { BridgeManagementView } from './components/BridgeManagementView';
 
-const STORAGE_KEY = 'sanaei_manager_profiles_v1';
-const ACTIVE_ID_KEY = 'sanaei_manager_active_id_v1';
+const STORAGE_KEY = 'cheshmak_panel_profiles_v2';
+const ACTIVE_ID_KEY = 'cheshmak_panel_active_id_v2';
+
+const EMPTY_PROFILE_PLACEHOLDER: SanaeiPanelProfile = {
+  id: 'none',
+  name: 'هیچ پنل ثنایی متصل نشده است',
+  panelUrl: '—',
+  webBasePath: '/',
+  username: '—',
+  allowInsecure: true,
+  mode: 'live',
+  hostname: '—',
+  lastSyncAt: 0,
+  inbounds: [],
+  onlineEmails: [],
+};
 
 type ActiveSection = 'inbounds' | 'bridge' | 'clients' | 'servers' | 'manual-connect';
 
@@ -57,21 +71,21 @@ export default function App() {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
           return parsed;
         }
       }
     } catch {
       // ignore storage errors
     }
-    return [createDemoSanaeiProfile()];
+    return [];
   });
 
   const [activeProfileId, setActiveProfileId] = useState<string>(() => {
     try {
-      return localStorage.getItem(ACTIVE_ID_KEY) || 'demo-hetzner-de';
+      return localStorage.getItem(ACTIVE_ID_KEY) || '';
     } catch {
-      return 'demo-hetzner-de';
+      return '';
     }
   });
 
@@ -99,11 +113,11 @@ export default function App() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Inline Manual Connect form state (for the dedicated 'manual-connect' tab)
-  const [inlineName, setInlineName] = useState('پنل ثنایی (wpbaharak)');
-  const [inlineUrl, setInlineUrl] = useState('https://panel.wpbaharak.ir:2053');
+  const [inlineName, setInlineName] = useState('');
+  const [inlineUrl, setInlineUrl] = useState('');
   const [inlineBasePath, setInlineBasePath] = useState('/');
-  const [inlineUser, setInlineUser] = useState('disslove22');
-  const [inlinePass, setInlinePass] = useState('199300');
+  const [inlineUser, setInlineUser] = useState('');
+  const [inlinePass, setInlinePass] = useState('');
   const [inlineCookie, setInlineCookie] = useState('');
   const [inlineAllowInsecure, setInlineAllowInsecure] = useState(true);
   const [inlineShowPass, setInlineShowPass] = useState(false);
@@ -119,50 +133,56 @@ export default function App() {
     }
   }, [isDark]);
 
-  // Automatically connect to user's live panel https://panel.wpbaharak.ir:2053 on load if not yet added
+  // On load, only sync if the server's bridge_store.json already has a saved Sanaei panel configured by the admin
   useEffect(() => {
-    const hasWpBaharak = profiles.some((p) => p.panelUrl.includes('wpbaharak.ir'));
-    if (!hasWpBaharak) {
-      fetch('/api/sanaei/connect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          panelUrl: 'https://panel.wpbaharak.ir:2053',
-          webBasePath: '/',
-          username: 'disslove22',
-          password: '199300',
-          allowInsecure: true,
-        }),
-      })
-        .then((r) => r.json())
-        .then((data) => {
-          if (data && data.success && Array.isArray(data.inbounds)) {
-            const liveProfile: SanaeiPanelProfile = {
-              id: 'panel-wpbaharak-live',
-              name: 'پنل ثنایی (panel.wpbaharak.ir)',
-              panelUrl: 'https://panel.wpbaharak.ir:2053',
-              webBasePath: '/',
-              username: 'disslove22',
-              password: '199300',
-              sessionCookie: data.sessionCookie || '',
-              allowInsecure: true,
-              mode: 'live',
-              hostname: data.hostname || 'panel.wpbaharak.ir',
-              lastSyncAt: Date.now(),
-              inbounds: data.inbounds,
-              onlineEmails: data.onlines || [],
-            };
-            setProfiles((prev) => [liveProfile, ...prev.filter((p) => p.id !== 'panel-wpbaharak-live')]);
-            setActiveProfileId('panel-wpbaharak-live');
-            if (data.inbounds.length > 0) {
-              setExpandedInboundIds(data.inbounds.map((i: SanaeiInbound) => i.id));
-            }
+    fetch('/api/bridge/admin/overview')
+      .then((r) => r.json())
+      .then((overview) => {
+        const s = overview?.settings;
+        if (s && s.sanaeiPanelUrl && s.sanaeiPanelUrl.trim() && s.sanaeiUsername) {
+          const alreadyExists = profiles.some((p) => p.panelUrl === s.sanaeiPanelUrl);
+          if (!alreadyExists) {
+            fetch('/api/sanaei/connect', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                panelUrl: s.sanaeiPanelUrl,
+                webBasePath: s.sanaeiWebBasePath || '/',
+                username: s.sanaeiUsername,
+                password: s.sanaeiPassword || '',
+                allowInsecure: s.allowInsecure ?? true,
+              }),
+            })
+              .then((r) => r.json())
+              .then((data) => {
+                if (data && data.success && Array.isArray(data.inbounds)) {
+                  const serverProfile: SanaeiPanelProfile = {
+                    id: 'panel-server-saved',
+                    name: `پنل ثنایی (${data.hostname || 'سرور اصلی'})`,
+                    panelUrl: s.sanaeiPanelUrl,
+                    webBasePath: s.sanaeiWebBasePath || '/',
+                    username: s.sanaeiUsername,
+                    password: s.sanaeiPassword || '',
+                    sessionCookie: data.sessionCookie || '',
+                    allowInsecure: s.allowInsecure ?? true,
+                    mode: 'live',
+                    hostname: data.hostname || 'localhost',
+                    lastSyncAt: Date.now(),
+                    inbounds: data.inbounds,
+                    onlineEmails: data.onlines || [],
+                  };
+                  setProfiles((prev) => [serverProfile, ...prev.filter((p) => p.id !== 'panel-server-saved')]);
+                  setActiveProfileId('panel-server-saved');
+                  if (data.inbounds.length > 0) {
+                    setExpandedInboundIds(data.inbounds.map((i: SanaeiInbound) => i.id));
+                  }
+                }
+              })
+              .catch(() => {});
           }
-        })
-        .catch(() => {
-          // Ignore background auto-connect failure
-        });
-    }
+        }
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -189,7 +209,7 @@ export default function App() {
   };
 
   const activeProfile = useMemo(() => {
-    return profiles.find((p) => p.id === activeProfileId) || profiles[0] || createDemoSanaeiProfile();
+    return profiles.find((p) => p.id === activeProfileId) || profiles[0] || EMPTY_PROFILE_PLACEHOLDER;
   }, [profiles, activeProfileId]);
 
   const handleSaveProfile = (newProf: SanaeiPanelProfile) => {
@@ -209,19 +229,33 @@ export default function App() {
   };
 
   const handleDeleteProfile = (id: string) => {
-    if (profiles.length <= 1) {
-      showNotice('حداقل یک پنل باید در لیست باقی بماند.', 'error');
-      return;
-    }
     const next = profiles.filter((p) => p.id !== id);
     setProfiles(next);
-    if (activeProfile.id === id) {
-      setActiveProfileId(next[0].id);
+    if (next.length > 0) {
+      if (activeProfile.id === id) {
+        setActiveProfileId(next[0].id);
+      }
+    } else {
+      setActiveProfileId('');
+      fetch('/api/bridge/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sanaeiPanelUrl: '',
+          sanaeiUsername: '',
+          sanaeiPassword: '',
+        }),
+      }).catch(() => {});
     }
     showNotice('پنل انتخاب‌شده از لیست حذف گردید.');
   };
 
   const handleRefreshActivePanel = async () => {
+    if (profiles.length === 0 || activeProfile.id === 'none') {
+      setEditingProfile(null);
+      setIsConnectModalOpen(true);
+      return;
+    }
     if (activeProfile.mode !== 'live') {
       const updated = { ...activeProfile, lastSyncAt: Date.now() };
       setProfiles((prev) => prev.map((p) => (p.id === activeProfile.id ? updated : p)));
@@ -636,38 +670,56 @@ export default function App() {
               </div>
 
               <div className="space-y-2">
-                {profiles.map((prof) => {
-                  const isSelected = prof.id === activeProfile.id;
-                  return (
-                    <div
-                      key={prof.id}
+                {profiles.length === 0 ? (
+                  <div className="p-4 rounded-xl border border-dashed border-slate-300 dark:border-slate-800 text-center space-y-2">
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      هنوز هیچ پنل ثنایی ثبت نشده است
+                    </p>
+                    <button
+                      type="button"
                       onClick={() => {
-                        setActiveProfileId(prof.id);
-                        if (prof.inbounds.length > 0) {
-                          setExpandedInboundIds([prof.inbounds[0].id]);
-                        }
+                        setEditingProfile(null);
+                        setIsConnectModalOpen(true);
                       }}
-                      className={`p-3 rounded-lg border cursor-pointer transition-colors ${
-                        isSelected
-                          ? 'bg-sky-50/70 dark:bg-sky-950/30 border-sky-500/60 dark:border-sky-500/50 text-slate-900 dark:text-white'
-                          : 'bg-slate-50/50 dark:bg-slate-950/40 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-700'
-                      }`}
+                      className="w-full py-1.5 px-3 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-semibold transition-colors"
                     >
-                      <div className="flex items-center justify-between gap-2 mb-1">
-                        <span className="text-xs font-bold truncate">{prof.name}</span>
-                        <span className="text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400 shrink-0">
-                          {prof.inbounds.length} این‌باند
-                        </span>
+                      + اتصال اولین پنل ثنایی
+                    </button>
+                  </div>
+                ) : (
+                  profiles.map((prof) => {
+                    const isSelected = prof.id === activeProfile.id;
+                    return (
+                      <div
+                        key={prof.id}
+                        onClick={() => {
+                          setActiveProfileId(prof.id);
+                          if (prof.inbounds.length > 0) {
+                            setExpandedInboundIds([prof.inbounds[0].id]);
+                          }
+                        }}
+                        className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                          isSelected
+                            ? 'bg-sky-50/70 dark:bg-sky-950/30 border-sky-500/60 dark:border-sky-500/50 text-slate-900 dark:text-white'
+                            : 'bg-slate-50/50 dark:bg-slate-950/40 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <span className="text-xs font-bold truncate">{prof.name}</span>
+                          <span className="text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400 shrink-0">
+                            {prof.inbounds.length} این‌باند
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 font-mono" dir="ltr">
+                          <span className="truncate">{prof.hostname}</span>
+                          <span>
+                            {prof.mode === 'live' ? 'API' : prof.mode === 'json' ? 'JSON' : 'Demo'}
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 font-mono" dir="ltr">
-                        <span className="truncate">{prof.hostname}</span>
-                        <span>
-                          {prof.mode === 'live' ? 'API' : prof.mode === 'json' ? 'JSON' : 'Demo'}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
               </div>
             </div>
 
@@ -1031,32 +1083,38 @@ export default function App() {
                           <td colSpan={8} className="py-12 px-6 text-center">
                             <div className="max-w-md mx-auto space-y-3">
                               <div className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-                                هیچ این‌باندی با فیلترهای فعلی یافت نشد
+                                {profiles.length === 0
+                                  ? 'هنوز هیچ پنل ثنایی (3X-UI) به سیستم متصل نشده است'
+                                  : 'هیچ این‌باندی با فیلترهای فعلی یافت نشد'}
                               </div>
-                              <p className="text-xs text-slate-500 dark:text-slate-400">
-                                می‌توانید فیلترهای جستجو را پاک کنید یا از طریق دکمه زیر، اطلاعات یک پنل ثنایی جدید را به صورت دستی وارد نمایید.
+                              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                                {profiles.length === 0
+                                  ? 'برای راه‌اندازی، روی دکمه زیر کلیک کنید و آدرس، نام کاربری و رمز عبور پنل ثنایی سرور خود را وارد نمایید تا این‌باندها و پل ارتباطی اپلیکیشن به صورت خودکار فعال شوند.'
+                                  : 'می‌توانید فیلترهای جستجو را پاک کنید یا از طریق دکمه زیر، اطلاعات یک پنل ثنایی جدید را به صورت دستی وارد نمایید.'}
                               </p>
                               <div className="flex items-center justify-center gap-3 pt-2">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setSearchQuery('');
-                                    setProtocolFilter('all');
-                                    setStatusFilter('all');
-                                  }}
-                                  className="px-4 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 rounded-lg"
-                                >
-                                  نمایش همه این‌باندها
-                                </button>
+                                {profiles.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSearchQuery('');
+                                      setProtocolFilter('all');
+                                      setStatusFilter('all');
+                                    }}
+                                    className="px-4 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 rounded-lg"
+                                  >
+                                    نمایش همه این‌باندها
+                                  </button>
+                                )}
                                 <button
                                   type="button"
                                   onClick={() => {
                                     setEditingProfile(null);
                                     setIsConnectModalOpen(true);
                                   }}
-                                  className="px-4 py-2 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 rounded-lg"
+                                  className="px-5 py-2.5 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 rounded-lg shadow-sm"
                                 >
-                                  اتصال دستی پنل ثنایی
+                                  + اتصال پنل ثنایی جدید
                                 </button>
                               </div>
                             </div>
@@ -1683,56 +1741,72 @@ export default function App() {
                 </div>
 
                 <div className="divide-y divide-slate-200 dark:divide-slate-800">
-                  {profiles.map((prof) => (
-                    <div
-                      key={prof.id}
-                      className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50/60 dark:hover:bg-slate-800/20 transition-colors"
-                    >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2.5">
-                          <span className="text-sm font-bold text-slate-900 dark:text-slate-100">
-                            {prof.name}
-                          </span>
-                          {prof.id === activeProfile.id && (
-                            <span className="text-xs font-semibold text-sky-600 dark:text-sky-400">
-                              · پنل فعال فعلی
+                  {profiles.length === 0 ? (
+                    <div className="p-8 text-center space-y-3">
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        هیچ پنل ثنایی در سیستم ذخیره نشده است.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingProfile(null);
+                          setIsConnectModalOpen(true);
+                        }}
+                        className="px-4 py-2 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 rounded-lg transition-colors"
+                      >
+                        + اتصال اولین پنل ثنایی
+                      </button>
+                    </div>
+                  ) : (
+                    profiles.map((prof) => (
+                      <div
+                        key={prof.id}
+                        className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50/60 dark:hover:bg-slate-800/20 transition-colors"
+                      >
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                              {prof.name}
                             </span>
-                          )}
+                            {prof.id === activeProfile.id && (
+                              <span className="text-xs font-semibold text-sky-600 dark:text-sky-400">
+                                · پنل فعال فعلی
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-mono" dir="ltr">
+                            <span>{prof.panelUrl}</span>
+                            <span>·</span>
+                            <span>User: {prof.username}</span>
+                            <span>·</span>
+                            <span>{prof.inbounds.length} Inbounds</span>
+                          </div>
                         </div>
-                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-mono" dir="ltr">
-                          <span>{prof.panelUrl}</span>
-                          <span>·</span>
-                          <span>User: {prof.username}</span>
-                          <span>·</span>
-                          <span>{prof.inbounds.length} Inbounds</span>
-                        </div>
-                      </div>
 
-                      <div className="flex items-center gap-2.5">
-                        {prof.id !== activeProfile.id && (
+                        <div className="flex items-center gap-2.5">
+                          {prof.id !== activeProfile.id && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveProfileId(prof.id);
+                                setActiveSection('inbounds');
+                              }}
+                              className="px-3.5 py-1.5 text-xs font-semibold text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-950/50 rounded-lg hover:bg-sky-100 transition-colors"
+                            >
+                              انتخاب و مشاهده این‌باندها
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => {
-                              setActiveProfileId(prof.id);
-                              setActiveSection('inbounds');
+                              setEditingProfile(prof);
+                              setIsConnectModalOpen(true);
                             }}
-                            className="px-3.5 py-1.5 text-xs font-semibold text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-950/50 rounded-lg hover:bg-sky-100 transition-colors"
+                            className="px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors flex items-center gap-1.5"
                           >
-                            انتخاب و مشاهده این‌باندها
+                            <Edit3 className="w-3.5 h-3.5" />
+                            ویرایش اتصال
                           </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingProfile(prof);
-                            setIsConnectModalOpen(true);
-                          }}
-                          className="px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors flex items-center gap-1.5"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                          ویرایش اتصال
-                        </button>
-                        {profiles.length > 1 && (
                           <button
                             type="button"
                             onClick={() => handleDeleteProfile(prof.id)}
@@ -1741,10 +1815,10 @@ export default function App() {
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
-                        )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))
+                  )}
                 </div>
               </div>
             </section>
