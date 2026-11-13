@@ -2650,34 +2650,22 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
 
             {/* Merchant Configuration Bar */}
             <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/60 rounded-xl flex flex-wrap items-center justify-between gap-4">
-              <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-3 flex-wrap w-full">
                 <span className="text-xs text-slate-600 dark:text-slate-300 font-medium">کد مرچنت درگاه زیبال (Merchant ID):</span>
                 <input
                   type="text"
                   value={zibalMerchant}
                   onChange={(e) => setZibalMerchant(e.target.value)}
-                  placeholder="کد مرچنت زیبال خود را وارد کنید (یا zibal برای تست)"
-                  className="px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500 w-72"
+                  placeholder="کد مرچنت درگاه زیبال را وارد کنید"
+                  className="px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500 flex-1 min-w-[240px]"
                   dir="ltr"
                 />
                 <button
                   type="button"
                   onClick={() => handleUpdateZibalSettings()}
-                  className="px-3.5 py-1.5 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs rounded-lg transition-all shadow"
+                  className="px-4 py-1.5 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs rounded-lg transition-all shadow"
                 >
                   ذخیره مرچنت
-                </button>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleUpdateZibalSettings('zibal', '');
-                  }}
-                  className="px-3 py-1.5 text-xs bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 rounded-lg text-slate-700 dark:text-slate-200 transition-colors"
-                >
-                  سوییچ به درگاه تستی (zibal)
                 </button>
               </div>
             </div>
