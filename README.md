@@ -73,7 +73,7 @@ git push -u origin main
 
 | متد | آدرس Endpoint | توضیحات |
 | :--- | :--- | :--- |
-| `POST` | `/api/bridge/register` | ثبت‌نام کاربر با ایمیل و اختصاص ۱۰۰۰ توکن اولیه |
+| `POST` | `/api/bridge/register` | ثبت‌نام کاربر با ایمیل  |
 | `POST` | `/api/bridge/login` | ورود کاربر و بازیابی وضعیت اشتراک |
 | `GET` | `/api/bridge/plans` | لیست بسته‌های اشتراک (۱۰ گیگابایت ۱ ماهه و ...) |
 | `POST` | `/api/bridge/purchase` | اتصال به ثنایی، ساخت کلاینت و صدور لینک `vless://` |
