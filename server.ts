@@ -2777,6 +2777,20 @@ async function startServer() {
   app.post('/api/bridge/admin/build-apk', async (req, res) => {
     req.setTimeout(300000);
     try {
+      // Pre-flight dependency check for required Android APK build tools
+      try {
+        await runExecAsync(
+          'command -v java && command -v keytool && command -v apktool && command -v zipalign && command -v apksigner'
+        );
+      } catch {
+        return res.status(400).json({
+          success: false,
+          code: 'BUILD_TOOLS_MISSING',
+          message:
+            'Build tools are missing on the server. Please run this command in your VPS terminal: apt-get update && apt-get install -y default-jre apktool zipalign apksigner',
+        });
+      }
+
       if (!fs.existsSync(baseApkPath)) {
         return res.status(404).json({
           success: false,

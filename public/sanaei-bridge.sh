@@ -80,10 +80,19 @@ show_menu() {
             fi
             sed -i 's/.*from ["'"'"']vite["'"'"'].*//g' "${INSTALL_DIR}/server.js" 2>/dev/null || true
 
-            # 4. Also self-update CLI script
+            # 4. Ensure npm multer & Android APK build tools exist on existing VPS
+            npm install multer --omit=dev --no-audit --no-fund > /dev/null 2>&1 || true
+            if ! command -v apktool >/dev/null 2>&1 || ! command -v apksigner >/dev/null 2>&1 || ! command -v zipalign >/dev/null 2>&1; then
+                if command -v apt-get >/dev/null 2>&1; then
+                    echo -e "${YELLOW}Nasbe abzarhaye pishniaze APK Builder (default-jre, apktool, zipalign, apksigner)...${PLAIN}"
+                    apt-get update -y && apt-get install -y default-jre apktool zipalign apksigner || true
+                fi
+            fi
+
+            # 5. Also self-update CLI script
             curl -fsSL "${LIVE_URL}/sanaei-bridge.sh" -o /usr/local/bin/sanaei-bridge 2>/dev/null && chmod +x /usr/local/bin/sanaei-bridge || true
 
-            # 5. Restart systemd service
+            # 6. Restart systemd service
             echo -e "${YELLOW}[3/3] Rah-andazi mojaddade service...${PLAIN}"
             systemctl restart sanaei-bridge
             sleep 1
