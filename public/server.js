@@ -5,7 +5,7 @@ import https from "https";
 import path2 from "path";
 import fs2 from "fs";
 import multer from "multer";
-import { exec, execSync } from "child_process";
+import { execSync, spawn } from "child_process";
 import { fileURLToPath as fileURLToPath2 } from "url";
 
 // bridgeStore.ts
@@ -3107,14 +3107,109 @@ ${statusText}`;
       res.status(500).json({ success: false, message: err?.message || "\u062E\u0637\u0627 \u062F\u0631 \u0627\u0631\u062A\u0628\u0627\u0637 \u0628\u0627 \u0633\u0631\u0648\u0631\u0647\u0627\u06CC \u062A\u0644\u06AF\u0631\u0627\u0645" });
     }
   });
-  const runExecAsync = (cmd) => {
-    return new Promise((resolve, reject) => {
-      exec(cmd, { maxBuffer: 25 * 1024 * 1024 }, (error, stdout, stderr) => {
-        if (error) {
-          reject(new Error(stderr?.trim() || stdout?.trim() || error.message));
-          return;
+  const apkLogClients = /* @__PURE__ */ new Set();
+  let recentApkLogs = [];
+  const broadcastApkLog = (rawText) => {
+    const lines = String(rawText).split(/\r?\n/).map((l) => l.trimEnd()).filter((l) => l.length > 0);
+    for (const line of lines) {
+      const timeStr = (/* @__PURE__ */ new Date()).toISOString().slice(11, 19);
+      const formattedLine = `[${timeStr}] ${line}`;
+      recentApkLogs.push(formattedLine);
+      if (recentApkLogs.length > 600) {
+        recentApkLogs.shift();
+      }
+      for (const client of apkLogClients) {
+        try {
+          client.write(`data: ${formattedLine}
+
+`);
+        } catch {
+          apkLogClients.delete(client);
         }
-        resolve({ stdout, stderr });
+      }
+    }
+  };
+  app.get("/api/bridge/admin/build-logs", (req, res) => {
+    req.setTimeout(6e5);
+    res.setTimeout(6e5);
+    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders?.();
+    for (const prevLine of recentApkLogs) {
+      res.write(`data: ${prevLine}
+
+`);
+    }
+    apkLogClients.add(res);
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(": ping\n\n");
+      } catch {
+        clearInterval(heartbeat);
+        apkLogClients.delete(res);
+      }
+    }, 15e3);
+    req.on("close", () => {
+      clearInterval(heartbeat);
+      apkLogClients.delete(res);
+    });
+  });
+  const runSpawnAsync = (cmd, timeoutMs = 6e5) => {
+    return new Promise((resolve, reject) => {
+      const fullCommand = `export _JAVA_OPTIONS="-Xmx512m" && ${cmd}`;
+      broadcastApkLog(`$ ${cmd}`);
+      const child = spawn("bash", ["-c", fullCommand], {
+        env: {
+          ...process.env,
+          _JAVA_OPTIONS: "-Xmx512m"
+        }
+      });
+      let stdoutAcc = "";
+      let stderrAcc = "";
+      let finished = false;
+      const timer = setTimeout(() => {
+        if (!finished) {
+          finished = true;
+          broadcastApkLog(`[ERROR] Command timed out after ${Math.round(timeoutMs / 1e3)}s: ${cmd}`);
+          try {
+            child.kill("SIGKILL");
+          } catch {
+          }
+          reject(new Error(`Command timed out after ${Math.round(timeoutMs / 1e3)} seconds`));
+        }
+      }, timeoutMs);
+      child.stdout.on("data", (chunk) => {
+        const text = chunk.toString("utf-8");
+        stdoutAcc += text;
+        if (stdoutAcc.length > 1e5) stdoutAcc = stdoutAcc.slice(-1e5);
+        broadcastApkLog(text);
+      });
+      child.stderr.on("data", (chunk) => {
+        const text = chunk.toString("utf-8");
+        stderrAcc += text;
+        if (stderrAcc.length > 1e5) stderrAcc = stderrAcc.slice(-1e5);
+        broadcastApkLog(text);
+      });
+      child.on("error", (err) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        broadcastApkLog(`[ERROR] Process spawn error: ${err.message}`);
+        reject(err);
+      });
+      child.on("close", (code, signal) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        if (code === 0) {
+          resolve({ stdout: stdoutAcc, stderr: stderrAcc });
+        } else {
+          const tailErr = stderrAcc.trim().split("\n").slice(-6).join(" | ") || stdoutAcc.trim().split("\n").slice(-6).join(" | ") || `Process exited with code ${code}${signal ? ` (signal ${signal})` : ""}`;
+          broadcastApkLog(`[ERROR] Command failed (exit code ${code}): ${tailErr}`);
+          reject(new Error(tailErr));
+        }
       });
     });
   };
@@ -3151,7 +3246,8 @@ ${statusText}`;
     limits: { fileSize: 200 * 1024 * 1024 }
   });
   app.post("/api/bridge/admin/upload-base-apk", (req, res) => {
-    req.setTimeout(3e5);
+    req.setTimeout(6e5);
+    res.setTimeout(6e5);
     apkUpload.any()(req, res, (uploadErr) => {
       if (uploadErr) {
         return res.status(400).json({
@@ -3200,47 +3296,64 @@ ${statusText}`;
     });
   });
   app.post("/api/bridge/admin/build-apk", async (req, res) => {
-    req.setTimeout(3e5);
+    req.setTimeout(6e5);
+    res.setTimeout(6e5);
+    recentApkLogs = [];
+    broadcastApkLog("============================================================");
+    broadcastApkLog("[INFO] Starting White-Label Custom APK Build Pipeline...");
+    broadcastApkLog('[INFO] Java Memory Limit: export _JAVA_OPTIONS="-Xmx512m"');
     try {
+      broadcastApkLog("[STEP 0/5] Checking required build tools (java, keytool, apktool, zipalign, apksigner)...");
       try {
-        await runExecAsync(
+        await runSpawnAsync(
           "command -v java && command -v keytool && command -v apktool && command -v zipalign && command -v apksigner"
         );
+        broadcastApkLog("[OK] All Android build tools are installed and verified.");
       } catch {
+        const missingMsg = "Build tools are missing on the server. Please run this command in your VPS terminal: apt-get update && apt-get install -y default-jre apktool zipalign apksigner";
+        broadcastApkLog(`[FATAL] ${missingMsg}`);
         return res.status(400).json({
           success: false,
           code: "BUILD_TOOLS_MISSING",
-          message: "Build tools are missing on the server. Please run this command in your VPS terminal: apt-get update && apt-get install -y default-jre apktool zipalign apksigner"
+          message: missingMsg
         });
       }
       if (!fs2.existsSync(baseApkPath)) {
+        const missingApkMsg = "\u0641\u0627\u06CC\u0644 \u067E\u0627\u06CC\u0647 base.apk \u062F\u0631 \u067E\u0648\u0634\u0647 public/apk \u06CC\u0627\u0641\u062A \u0646\u0634\u062F. \u0644\u0637\u0641\u0627\u064B \u0627\u0628\u062A\u062F\u0627 \u0641\u0627\u06CC\u0644 base.apk \u0631\u0627 \u0622\u067E\u0644\u0648\u062F \u06CC\u0627 \u062F\u0631 \u0633\u0631\u0648\u0631 \u0642\u0631\u0627\u0631 \u062F\u0647\u06CC\u062F.";
+        broadcastApkLog(`[FATAL] base.apk not found at ${baseApkPath}`);
         return res.status(404).json({
           success: false,
           code: "BASE_APK_MISSING",
-          message: "\u0641\u0627\u06CC\u0644 \u067E\u0627\u06CC\u0647 base.apk \u062F\u0631 \u067E\u0648\u0634\u0647 public/apk \u06CC\u0627\u0641\u062A \u0646\u0634\u062F. \u0644\u0637\u0641\u0627\u064B \u0627\u0628\u062A\u062F\u0627 \u0641\u0627\u06CC\u0644 base.apk \u0631\u0627 \u0622\u067E\u0644\u0648\u062F \u06CC\u0627 \u062F\u0631 \u0633\u0631\u0648\u0631 \u0642\u0631\u0627\u0631 \u062F\u0647\u06CC\u062F."
+          message: missingApkMsg
         });
       }
       if (!fs2.existsSync(downloadsDir)) {
         fs2.mkdirSync(downloadsDir, { recursive: true });
       }
       if (!fs2.existsSync(keystorePath)) {
+        broadcastApkLog("[KEYSTORE] my-upload-key.jks not found. Generating RSA-2048 signing keystore...");
         try {
-          await runExecAsync(
+          await runSpawnAsync(
             `keytool -genkeypair -v -keystore "${keystorePath}" -storepass android -alias upload -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=NovaShield,OU=Mobile,O=Nova,L=Tehran,S=Tehran,C=IR"`
           );
+          broadcastApkLog("[OK] Signing keystore generated successfully.");
         } catch (ksErr) {
           return res.status(500).json({
             success: false,
             message: `\u062E\u0637\u0627 \u062F\u0631 \u0633\u0627\u062E\u062A \u062E\u0648\u062F\u06A9\u0627\u0631 \u06A9\u0644\u06CC\u062F \u0627\u0645\u0636\u0627 (keytool): ${ksErr?.message || "\u0627\u0628\u0632\u0627\u0631 keytool/Java \u0631\u0648\u06CC \u0633\u0631\u0648\u0631 \u0646\u0635\u0628 \u0646\u06CC\u0633\u062A."}`
           });
         }
+      } else {
+        broadcastApkLog(`[OK] Using existing keystore: ${keystorePath}`);
       }
       const reqProto = req.headers["x-forwarded-proto"]?.split(",")[0]?.trim() || req.protocol || "http";
       const reqHost = req.get("host") || `127.0.0.1:${process.env.PORT || 3e3}`;
       const detectedServerUrl = `${reqProto}://${reqHost}`;
       const targetServerUrl = req.body?.serverUrl && String(req.body.serverUrl).trim() ? String(req.body.serverUrl).trim().replace(/\/+$/, "") : detectedServerUrl;
-      await runExecAsync("rm -rf /tmp/apk_build /tmp/unsigned.apk /tmp/aligned.apk");
-      await runExecAsync(`apktool d -f "${baseApkPath}" -o /tmp/apk_build`);
+      broadcastApkLog("[STEP 1/4] Cleaning temporary build directories & decoding base.apk with apktool...");
+      await runSpawnAsync("rm -rf /tmp/apk_build /tmp/unsigned.apk /tmp/aligned.apk");
+      await runSpawnAsync(`apktool d -f "${baseApkPath}" -o /tmp/apk_build`);
+      broadcastApkLog(`[STEP 2/4] Injecting bridge_server_url (${targetServerUrl}) into assets/config.json...`);
       const assetsDir = "/tmp/apk_build/assets";
       const configJsonPath = path2.join(assetsDir, "config.json");
       if (!fs2.existsSync(assetsDir)) {
@@ -3257,13 +3370,18 @@ ${statusText}`;
       }
       configData.bridge_server_url = targetServerUrl;
       fs2.writeFileSync(configJsonPath, JSON.stringify(configData, null, 2), "utf-8");
-      await runExecAsync("apktool b /tmp/apk_build -o /tmp/unsigned.apk");
-      await runExecAsync("zipalign -p -f 4 /tmp/unsigned.apk /tmp/aligned.apk");
-      await runExecAsync(`apksigner sign --ks "${keystorePath}" --ks-pass pass:android /tmp/aligned.apk`);
-      await runExecAsync(`mv -f /tmp/aligned.apk "${customApkPath}"`);
-      await runExecAsync("rm -rf /tmp/apk_build /tmp/unsigned.apk /tmp/aligned.apk").catch(() => {
+      broadcastApkLog(`[OK] Updated ${configJsonPath} -> ${JSON.stringify(configData)}`);
+      broadcastApkLog("[STEP 3/4] Rebuilding modified APK package with apktool b...");
+      await runSpawnAsync("apktool b /tmp/apk_build -o /tmp/unsigned.apk");
+      broadcastApkLog("[STEP 4/4] Aligning with zipalign and signing with apksigner...");
+      await runSpawnAsync("zipalign -p -f 4 /tmp/unsigned.apk /tmp/aligned.apk");
+      await runSpawnAsync(`apksigner sign --ks "${keystorePath}" --ks-pass pass:android /tmp/aligned.apk`);
+      await runSpawnAsync(`mv -f /tmp/aligned.apk "${customApkPath}"`);
+      await runSpawnAsync("rm -rf /tmp/apk_build /tmp/unsigned.apk /tmp/aligned.apk").catch(() => {
       });
       const stat = fs2.statSync(customApkPath);
+      broadcastApkLog(`[SUCCESS] Custom APK built & signed! Size: ${(stat.size / (1024 * 1024)).toFixed(2)} MB`);
+      broadcastApkLog("============================================================");
       res.json({
         success: true,
         message: "\u0641\u0627\u06CC\u0644 APK \u0627\u062E\u062A\u0635\u0627\u0635\u06CC \u0628\u0627 \u0622\u062F\u0631\u0633 \u0633\u0631\u0648\u0631 \u0634\u0645\u0627 \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u0633\u0627\u062E\u062A\u0647 \u0648 \u0627\u0645\u0636\u0627 \u0634\u062F!",
@@ -3275,6 +3393,7 @@ ${statusText}`;
       });
     } catch (err) {
       console.error("APK build error:", err);
+      broadcastApkLog(`[FATAL] Build aborted: ${err?.message || "Unknown error"}`);
       res.status(500).json({
         success: false,
         message: `\u062E\u0637\u0627 \u062F\u0631 \u0633\u0627\u062E\u062A APK \u0627\u062E\u062A\u0635\u0627\u0635\u06CC: ${err?.message || "\u0627\u0637\u0645\u06CC\u0646\u0627\u0646 \u062D\u0627\u0635\u0644 \u06A9\u0646\u06CC\u062F apktool\u060C zipalign \u0648 apksigner \u0631\u0648\u06CC \u0633\u0631\u0648\u0631 \u0646\u0635\u0628 \u0647\u0633\u062A\u0646\u062F."}`
@@ -3414,8 +3533,12 @@ ${statusText}`;
     });
   }
   const PORT = Number(process.env.PORT) || 3e3;
-  app.listen(PORT, "0.0.0.0", () => {
+  const httpServer = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Sanaei Management Panel server listening on http://0.0.0.0:${PORT}`);
   });
+  httpServer.timeout = 6e5;
+  httpServer.requestTimeout = 6e5;
+  httpServer.keepAliveTimeout = 6e5;
+  httpServer.headersTimeout = 61e4;
 }
 startServer();

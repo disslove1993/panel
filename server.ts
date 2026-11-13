@@ -4,7 +4,7 @@ import https from 'https';
 import path from 'path';
 import fs from 'fs';
 import multer from 'multer';
-import { exec, execSync } from 'child_process';
+import { exec, execSync, spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { bridgeStore, WALLET_PACKAGES } from './bridgeStore';
 import {
@@ -2665,16 +2665,134 @@ async function startServer() {
   });
 
   // ============================================================================
-  // 32. AUTOMATED IN-PANEL APK BUILDER (White-Label Repackaging)
+  // 32. AUTOMATED IN-PANEL APK BUILDER (White-Label Repackaging + Live SSE Logs)
   // ============================================================================
-  const runExecAsync = (cmd: string): Promise<{ stdout: string; stderr: string }> => {
-    return new Promise((resolve, reject) => {
-      exec(cmd, { maxBuffer: 25 * 1024 * 1024 }, (error, stdout, stderr) => {
-        if (error) {
-          reject(new Error(stderr?.trim() || stdout?.trim() || error.message));
-          return;
+  const apkLogClients = new Set<express.Response>();
+  let recentApkLogs: string[] = [];
+
+  const broadcastApkLog = (rawText: string) => {
+    const lines = String(rawText)
+      .split(/\r?\n/)
+      .map((l) => l.trimEnd())
+      .filter((l) => l.length > 0);
+
+    for (const line of lines) {
+      const timeStr = new Date().toISOString().slice(11, 19);
+      const formattedLine = `[${timeStr}] ${line}`;
+      recentApkLogs.push(formattedLine);
+      if (recentApkLogs.length > 600) {
+        recentApkLogs.shift();
+      }
+      for (const client of apkLogClients) {
+        try {
+          client.write(`data: ${formattedLine}\n\n`);
+        } catch {
+          apkLogClients.delete(client);
         }
-        resolve({ stdout, stderr });
+      }
+    }
+  };
+
+  // Server-Sent Events (SSE) endpoint for real-time APK build logs
+  app.get('/api/bridge/admin/build-logs', (req, res) => {
+    req.setTimeout(600000);
+    res.setTimeout(600000);
+
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+
+    // Send buffered logs from current/latest build session immediately upon connect
+    for (const prevLine of recentApkLogs) {
+      res.write(`data: ${prevLine}\n\n`);
+    }
+
+    apkLogClients.add(res);
+
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(': ping\n\n');
+      } catch {
+        clearInterval(heartbeat);
+        apkLogClients.delete(res);
+      }
+    }, 15000);
+
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      apkLogClients.delete(res);
+    });
+  });
+
+  // Spawn helper that streams stdout & stderr to SSE clients in real time with _JAVA_OPTIONS="-Xmx512m"
+  const runSpawnAsync = (
+    cmd: string,
+    timeoutMs: number = 600000
+  ): Promise<{ stdout: string; stderr: string }> => {
+    return new Promise((resolve, reject) => {
+      const fullCommand = `export _JAVA_OPTIONS="-Xmx512m" && ${cmd}`;
+      broadcastApkLog(`$ ${cmd}`);
+
+      const child = spawn('bash', ['-c', fullCommand], {
+        env: {
+          ...process.env,
+          _JAVA_OPTIONS: '-Xmx512m',
+        },
+      });
+
+      let stdoutAcc = '';
+      let stderrAcc = '';
+      let finished = false;
+
+      const timer = setTimeout(() => {
+        if (!finished) {
+          finished = true;
+          broadcastApkLog(`[ERROR] Command timed out after ${Math.round(timeoutMs / 1000)}s: ${cmd}`);
+          try {
+            child.kill('SIGKILL');
+          } catch {}
+          reject(new Error(`Command timed out after ${Math.round(timeoutMs / 1000)} seconds`));
+        }
+      }, timeoutMs);
+
+      child.stdout.on('data', (chunk: Buffer) => {
+        const text = chunk.toString('utf-8');
+        stdoutAcc += text;
+        if (stdoutAcc.length > 100000) stdoutAcc = stdoutAcc.slice(-100000);
+        broadcastApkLog(text);
+      });
+
+      child.stderr.on('data', (chunk: Buffer) => {
+        const text = chunk.toString('utf-8');
+        stderrAcc += text;
+        if (stderrAcc.length > 100000) stderrAcc = stderrAcc.slice(-100000);
+        broadcastApkLog(text);
+      });
+
+      child.on('error', (err) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        broadcastApkLog(`[ERROR] Process spawn error: ${err.message}`);
+        reject(err);
+      });
+
+      child.on('close', (code, signal) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        if (code === 0) {
+          resolve({ stdout: stdoutAcc, stderr: stderrAcc });
+        } else {
+          const tailErr =
+            stderrAcc.trim().split('\n').slice(-6).join(' | ') ||
+            stdoutAcc.trim().split('\n').slice(-6).join(' | ') ||
+            `Process exited with code ${code}${signal ? ` (signal ${signal})` : ''}`;
+          broadcastApkLog(`[ERROR] Command failed (exit code ${code}): ${tailErr}`);
+          reject(new Error(tailErr));
+        }
       });
     });
   };
@@ -2719,7 +2837,8 @@ async function startServer() {
 
   // Upload base.apk via multipart/form-data using Multer
   app.post('/api/bridge/admin/upload-base-apk', (req, res) => {
-    req.setTimeout(300000);
+    req.setTimeout(600000);
+    res.setTimeout(600000);
     apkUpload.any()(req, res, (uploadErr: any) => {
       if (uploadErr) {
         return res.status(400).json({
@@ -2773,29 +2892,43 @@ async function startServer() {
     });
   });
 
-  // Build Customized White-Label APK
+  // Build Customized White-Label APK (using child_process.spawn + live SSE streaming)
   app.post('/api/bridge/admin/build-apk', async (req, res) => {
-    req.setTimeout(300000);
+    req.setTimeout(600000);
+    res.setTimeout(600000);
+
+    recentApkLogs = [];
+    broadcastApkLog('============================================================');
+    broadcastApkLog('[INFO] Starting White-Label Custom APK Build Pipeline...');
+    broadcastApkLog('[INFO] Java Memory Limit: export _JAVA_OPTIONS="-Xmx512m"');
+
     try {
       // Pre-flight dependency check for required Android APK build tools
+      broadcastApkLog('[STEP 0/5] Checking required build tools (java, keytool, apktool, zipalign, apksigner)...');
       try {
-        await runExecAsync(
+        await runSpawnAsync(
           'command -v java && command -v keytool && command -v apktool && command -v zipalign && command -v apksigner'
         );
+        broadcastApkLog('[OK] All Android build tools are installed and verified.');
       } catch {
+        const missingMsg =
+          'Build tools are missing on the server. Please run this command in your VPS terminal: apt-get update && apt-get install -y default-jre apktool zipalign apksigner';
+        broadcastApkLog(`[FATAL] ${missingMsg}`);
         return res.status(400).json({
           success: false,
           code: 'BUILD_TOOLS_MISSING',
-          message:
-            'Build tools are missing on the server. Please run this command in your VPS terminal: apt-get update && apt-get install -y default-jre apktool zipalign apksigner',
+          message: missingMsg,
         });
       }
 
       if (!fs.existsSync(baseApkPath)) {
+        const missingApkMsg =
+          'فایل پایه base.apk در پوشه public/apk یافت نشد. لطفاً ابتدا فایل base.apk را آپلود یا در سرور قرار دهید.';
+        broadcastApkLog(`[FATAL] base.apk not found at ${baseApkPath}`);
         return res.status(404).json({
           success: false,
           code: 'BASE_APK_MISSING',
-          message: 'فایل پایه base.apk در پوشه public/apk یافت نشد. لطفاً ابتدا فایل base.apk را آپلود یا در سرور قرار دهید.',
+          message: missingApkMsg,
         });
       }
 
@@ -2805,16 +2938,20 @@ async function startServer() {
 
       // Ensure keystore exists before signing
       if (!fs.existsSync(keystorePath)) {
+        broadcastApkLog('[KEYSTORE] my-upload-key.jks not found. Generating RSA-2048 signing keystore...');
         try {
-          await runExecAsync(
+          await runSpawnAsync(
             `keytool -genkeypair -v -keystore "${keystorePath}" -storepass android -alias upload -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=NovaShield,OU=Mobile,O=Nova,L=Tehran,S=Tehran,C=IR"`
           );
+          broadcastApkLog('[OK] Signing keystore generated successfully.');
         } catch (ksErr: any) {
           return res.status(500).json({
             success: false,
             message: `خطا در ساخت خودکار کلید امضا (keytool): ${ksErr?.message || 'ابزار keytool/Java روی سرور نصب نیست.'}`,
           });
         }
+      } else {
+        broadcastApkLog(`[OK] Using existing keystore: ${keystorePath}`);
       }
 
       // Determine current Server URL
@@ -2827,10 +2964,12 @@ async function startServer() {
           : detectedServerUrl;
 
       // 1. Clean temp folders & Decode base.apk
-      await runExecAsync('rm -rf /tmp/apk_build /tmp/unsigned.apk /tmp/aligned.apk');
-      await runExecAsync(`apktool d -f "${baseApkPath}" -o /tmp/apk_build`);
+      broadcastApkLog('[STEP 1/4] Cleaning temporary build directories & decoding base.apk with apktool...');
+      await runSpawnAsync('rm -rf /tmp/apk_build /tmp/unsigned.apk /tmp/aligned.apk');
+      await runSpawnAsync(`apktool d -f "${baseApkPath}" -o /tmp/apk_build`);
 
       // 2. Inject Server URL into /tmp/apk_build/assets/config.json
+      broadcastApkLog(`[STEP 2/4] Injecting bridge_server_url (${targetServerUrl}) into assets/config.json...`);
       const assetsDir = '/tmp/apk_build/assets';
       const configJsonPath = path.join(assetsDir, 'config.json');
       if (!fs.existsSync(assetsDir)) {
@@ -2848,15 +2987,23 @@ async function startServer() {
       }
       configData.bridge_server_url = targetServerUrl;
       fs.writeFileSync(configJsonPath, JSON.stringify(configData, null, 2), 'utf-8');
+      broadcastApkLog(`[OK] Updated ${configJsonPath} -> ${JSON.stringify(configData)}`);
 
-      // 3. Rebuild, Zipalign, Sign, and Move to public/downloads/Cheshmak-Custom.apk
-      await runExecAsync('apktool b /tmp/apk_build -o /tmp/unsigned.apk');
-      await runExecAsync('zipalign -p -f 4 /tmp/unsigned.apk /tmp/aligned.apk');
-      await runExecAsync(`apksigner sign --ks "${keystorePath}" --ks-pass pass:android /tmp/aligned.apk`);
-      await runExecAsync(`mv -f /tmp/aligned.apk "${customApkPath}"`);
-      await runExecAsync('rm -rf /tmp/apk_build /tmp/unsigned.apk /tmp/aligned.apk').catch(() => {});
+      // 3. Rebuild APK with apktool b
+      broadcastApkLog('[STEP 3/4] Rebuilding modified APK package with apktool b...');
+      await runSpawnAsync('apktool b /tmp/apk_build -o /tmp/unsigned.apk');
+
+      // 4. Align & Sign APK
+      broadcastApkLog('[STEP 4/4] Aligning with zipalign and signing with apksigner...');
+      await runSpawnAsync('zipalign -p -f 4 /tmp/unsigned.apk /tmp/aligned.apk');
+      await runSpawnAsync(`apksigner sign --ks "${keystorePath}" --ks-pass pass:android /tmp/aligned.apk`);
+      await runSpawnAsync(`mv -f /tmp/aligned.apk "${customApkPath}"`);
+      await runSpawnAsync('rm -rf /tmp/apk_build /tmp/unsigned.apk /tmp/aligned.apk').catch(() => {});
 
       const stat = fs.statSync(customApkPath);
+      broadcastApkLog(`[SUCCESS] Custom APK built & signed! Size: ${(stat.size / (1024 * 1024)).toFixed(2)} MB`);
+      broadcastApkLog('============================================================');
+
       res.json({
         success: true,
         message: 'فایل APK اختصاصی با آدرس سرور شما با موفقیت ساخته و امضا شد!',
@@ -2868,6 +3015,7 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error('APK build error:', err);
+      broadcastApkLog(`[FATAL] Build aborted: ${err?.message || 'Unknown error'}`);
       res.status(500).json({
         success: false,
         message: `خطا در ساخت APK اختصاصی: ${err?.message || 'اطمینان حاصل کنید apktool، zipalign و apksigner روی سرور نصب هستند.'}`,
@@ -3016,9 +3164,13 @@ async function startServer() {
 
 
   const PORT = Number(process.env.PORT) || 3000;
-  app.listen(PORT, '0.0.0.0', () => {
+  const httpServer = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Sanaei Management Panel server listening on http://0.0.0.0:${PORT}`);
   });
+  httpServer.timeout = 600000;
+  httpServer.requestTimeout = 600000;
+  httpServer.keepAliveTimeout = 600000;
+  httpServer.headersTimeout = 610000;
 }
 
 startServer();

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Smartphone,
   Copy,
@@ -173,6 +173,9 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
     serverUrl: string;
     fileSize: number;
   } | null>(null);
+  const [apkBuildLogs, setApkBuildLogs] = useState<string[]>([]);
+  const terminalContainerRef = useRef<HTMLDivElement | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
 
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
 
@@ -936,7 +939,7 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
       setApkBuildError('زمان آپلود فایل به پایان رسید. لطفاً مجدداً تلاش کنید.');
     };
 
-    xhr.timeout = 300000;
+    xhr.timeout = 600000;
     xhr.send(formData);
   };
 
@@ -945,14 +948,60 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
     setBuildProgress(0);
     setApkBuildError(null);
     setApkBuildSuccess(null);
+    setApkBuildLogs(['[INIT] Connecting to Live Build Log Stream (/api/bridge/admin/build-logs)...']);
 
-    // Smoothly animate progress from 0% to 90% over ~20 seconds (0.9% every 200ms)
+    // Close any previous EventSource connection
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+
+    // Open Server-Sent Events (SSE) stream for live apktool/apksigner output
+    const es = new EventSource('/api/bridge/admin/build-logs');
+    eventSourceRef.current = es;
+
+    es.onmessage = (event) => {
+      if (!event.data) return;
+      const line = String(event.data);
+      setApkBuildLogs((prev) => {
+        if (prev[prev.length - 1] === line) return prev;
+        return [...prev, line];
+      });
+
+      // Sync progress bar milestones with real apktool/zipalign/apksigner stages
+      if (line.includes('[STEP 1/4]') || line.includes('apktool d')) {
+        setBuildProgress((p) => Math.max(p, 15));
+      } else if (line.includes('Baksmaling') || line.includes('Loading resource table')) {
+        setBuildProgress((p) => Math.max(p, 30));
+      } else if (line.includes('[STEP 2/4]') || line.includes('config.json')) {
+        setBuildProgress((p) => Math.max(p, 50));
+      } else if (line.includes('[STEP 3/4]') || line.includes('apktool b')) {
+        setBuildProgress((p) => Math.max(p, 60));
+      } else if (line.includes('Building apk file') || line.includes('Built apk')) {
+        setBuildProgress((p) => Math.max(p, 80));
+      } else if (line.includes('[STEP 4/4]') || line.includes('zipalign') || line.includes('apksigner')) {
+        setBuildProgress((p) => Math.max(p, 90));
+      }
+    };
+
+    es.onerror = () => {
+      // Keep terminal visible; final status is handled when POST request completes
+    };
+
+    // Smoothly animate progress up to 95%, slowing down after 75% for longer 2-vCPU builds
     const progressTimer = window.setInterval(() => {
       setBuildProgress((prev) => {
-        if (prev >= 90) return 90;
-        return Number(Math.min(90, prev + 0.9).toFixed(1));
+        if (prev >= 95) return 95;
+        const step = prev < 60 ? 0.8 : prev < 85 ? 0.3 : 0.08;
+        return Number(Math.min(95, prev + step).toFixed(2));
       });
-    }, 200);
+    }, 250);
+
+    // 10-minute (600,000ms) client-side timeout via AbortController
+    const controller = new AbortController();
+    const clientTimeoutId = window.setTimeout(() => {
+      controller.abort();
+    }, 600000);
 
     try {
       const res = await fetch('/api/bridge/admin/build-apk', {
@@ -961,9 +1010,11 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
         body: JSON.stringify({
           serverUrl: apkServerUrlInput.trim() || baseUrl,
         }),
+        signal: controller.signal,
       });
       const data = await safeParseJson(res);
       window.clearInterval(progressTimer);
+      window.clearTimeout(clientTimeoutId);
 
       if (data && data.success) {
         setBuildProgress(100);
@@ -982,12 +1033,30 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
       }
     } catch (err: any) {
       window.clearInterval(progressTimer);
+      window.clearTimeout(clientTimeoutId);
       setBuildProgress(0);
-      setApkBuildError(err?.message || 'خطا در ارتباط با سرور هنگام ساخت APK');
+      if (err?.name === 'AbortError') {
+        setApkBuildError('زمان ساخت APK بیش از ۱۰ دقیقه طول کشید و متوقف شد (Client Timeout 600s).');
+      } else {
+        setApkBuildError(err?.message || 'خطا در ارتباط با سرور هنگام ساخت APK');
+      }
     } finally {
       setIsBuildingApk(false);
+      window.setTimeout(() => {
+        if (eventSourceRef.current) {
+          eventSourceRef.current.close();
+          eventSourceRef.current = null;
+        }
+      }, 500);
     }
   };
+
+  // Auto-scroll Live Log Terminal to bottom as new SSE lines arrive
+  useEffect(() => {
+    if (terminalContainerRef.current) {
+      terminalContainerRef.current.scrollTop = terminalContainerRef.current.scrollHeight;
+    }
+  }, [apkBuildLogs]);
 
   useEffect(() => {
     fetchBridgeData();
@@ -995,6 +1064,11 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
     fetchPaymentPackages();
     fetchCardOrders();
     fetchApkStatus();
+    return () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+      }
+    };
   }, []);
 
 
@@ -2357,10 +2431,10 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                         ? 'فایل APK اختصاصی با موفقیت بیلد و امضا شد! ✅'
                         : buildProgress < 25
                         ? 'مرحله ۱/۴: دیکد کردن ساختار base.apk با apktool...'
-                        : buildProgress < 45
+                        : buildProgress < 55
                         ? 'مرحله ۲/۴: تزریق آدرس سرور در assets/config.json...'
-                        : buildProgress < 75
-                        ? 'مرحله ۳/۴: کامپایل مجدد و بهینه‌سازی با zipalign...'
+                        : buildProgress < 85
+                        ? 'مرحله ۳/۴: کامپایل مجدد و بهینه‌سازی با apktool b & zipalign...'
                         : 'مرحله ۴/۴: امضای دیجیتال نهایی با apksigner...'}
                     </span>
                   </div>
@@ -2377,6 +2451,98 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                     }`}
                     style={{ width: `${buildProgress}%` }}
                   />
+                </div>
+              </div>
+            )}
+
+            {/* Live Log Terminal (Real-Time SSE Output of apktool, zipalign, apksigner & Java) */}
+            {(isBuildingApk || apkBuildLogs.length > 0) && (
+              <div className="rounded-2xl overflow-hidden border border-slate-800 shadow-xl bg-gray-950">
+                <div className="px-4 py-2.5 bg-gray-900 border-b border-gray-800 flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-400" />
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs font-mono text-gray-300" dir="ltr">
+                      <Terminal className="w-3.5 h-3.5 text-green-400" />
+                      <span>Live Build Terminal — apktool / apksigner (_JAVA_OPTIONS="-Xmx512m")</span>
+                    </div>
+                    {isBuildingApk && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                        LIVE SSE
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard(apkBuildLogs.join('\n'), 'apk-build-logs')}
+                      className="px-2.5 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-[11px] font-mono flex items-center gap-1 transition-colors"
+                    >
+                      {copiedSection === 'apk-build-logs' ? (
+                        <>
+                          <Check className="w-3 h-3 text-emerald-400" />
+                          <span>Copied</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3" />
+                          <span>Copy Logs</span>
+                        </>
+                      )}
+                    </button>
+                    {!isBuildingApk && (
+                      <button
+                        type="button"
+                        onClick={() => setApkBuildLogs([])}
+                        className="px-2.5 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200 text-[11px] font-mono transition-colors"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div
+                  ref={terminalContainerRef}
+                  dir="ltr"
+                  className="bg-gray-900 text-green-400 font-mono text-xs p-4 h-64 overflow-y-auto space-y-1 leading-relaxed select-text"
+                >
+                  {apkBuildLogs.map((line, idx) => {
+                    const isError =
+                      line.includes('[ERROR]') ||
+                      line.includes('[FATAL]') ||
+                      line.includes('Exception') ||
+                      line.includes('BrutException');
+                    const isSuccess = line.includes('[SUCCESS]') || line.includes('[OK]');
+                    const isStep = line.includes('[STEP') || line.includes(' $ ');
+
+                    return (
+                      <div
+                        key={idx}
+                        className={`whitespace-pre-wrap break-all ${
+                          isError
+                            ? 'text-rose-400 font-bold'
+                            : isSuccess
+                            ? 'text-emerald-300 font-bold'
+                            : isStep
+                            ? 'text-sky-300 font-semibold'
+                            : 'text-green-400'
+                        }`}
+                      >
+                        {line}
+                      </div>
+                    );
+                  })}
+                  {isBuildingApk && (
+                    <div className="flex items-center gap-2 text-gray-400 pt-1 animate-pulse">
+                      <span>▋</span>
+                      <span>Streaming child_process output...</span>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
