@@ -81,6 +81,7 @@ export interface BridgeServerItem {
   pingMs: number;
   isPro: boolean;
   isOnline: boolean;
+  supportsSwitch?: boolean;
 }
 
 export interface BridgeWalletPackage {

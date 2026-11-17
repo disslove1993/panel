@@ -719,43 +719,76 @@ async function provisionClientOnSanaei(params) {
   if (!inbounds || inbounds.length === 0) {
     throw new Error("\u0647\u06CC\u0686 \u0627\u06CC\u0646\u200C\u0628\u0627\u0646\u062F\u06CC \u062F\u0631 \u067E\u0646\u0644 \u062B\u0646\u0627\u06CC\u06CC \u06CC\u0627\u0641\u062A \u0646\u0634\u062F.");
   }
-  let targetInbound = inbounds.find((i) => i.id === params.inboundId);
-  if (!targetInbound) {
-    targetInbound = inbounds.find((i) => i.id === 4 && i.enable);
+  const clientProtocols = ["vless", "vmess", "trojan", "shadowsocks"];
+  const requestedId = params.inboundId !== void 0 && params.inboundId !== null && Number(params.inboundId) > 0 ? Number(params.inboundId) : void 0;
+  let targetInbound = requestedId ? inbounds.find((i) => Number(i.id) === requestedId) : void 0;
+  if (requestedId && params.strictInbound) {
+    if (!targetInbound) {
+      throw new Error(`\u0627\u06CC\u0646\u200C\u0628\u0627\u0646\u062F \u0628\u0627 \u0634\u0646\u0627\u0633\u0647 #${requestedId} \u062F\u0631 \u067E\u0646\u0644 \u062B\u0646\u0627\u06CC\u06CC \u06CC\u0627\u0641\u062A \u0646\u0634\u062F.`);
+    }
+    if (!targetInbound.enable) {
+      throw new Error(`\u0627\u06CC\u0646\u200C\u0628\u0627\u0646\u062F \xAB${targetInbound.remark}\xBB (#${requestedId}) \u062F\u0631 \u067E\u0646\u0644 \u062B\u0646\u0627\u06CC\u06CC \u063A\u06CC\u0631\u0641\u0639\u0627\u0644 \u0627\u0633\u062A.`);
+    }
+    if (String(targetInbound.protocol || "").toLowerCase() === "wireguard") {
+      throw new Error(
+        `\u0627\u06CC\u0646\u200C\u0628\u0627\u0646\u062F \xAB${targetInbound.remark}\xBB (#${requestedId}) \u0627\u0632 \u0646\u0648\u0639 WireGuard \u0627\u0633\u062A \u0648 \u0627\u0632 \u0633\u0627\u062E\u062A \u06A9\u0644\u0627\u06CC\u0646\u062A \u062E\u0648\u062F\u06A9\u0627\u0631 VLESS/VMess \u067E\u0634\u062A\u06CC\u0628\u0627\u0646\u06CC \u0646\u0645\u06CC\u200C\u06A9\u0646\u062F. \u0644\u0637\u0641\u0627\u064B \u06CC\u06A9\u06CC \u0627\u0632 \u0627\u06CC\u0646\u200C\u0628\u0627\u0646\u062F\u0647\u0627\u06CC VLESS \u06CC\u0627 VMess \u0631\u0627 \u0627\u0646\u062A\u062E\u0627\u0628 \u06A9\u0646\u06CC\u062F.`
+      );
+    }
   }
   if (!targetInbound) {
-    targetInbound = inbounds.find((i) => i.id === settings.defaultInboundId && i.enable);
+    targetInbound = inbounds.find(
+      (i) => i.id === settings.defaultInboundId && i.enable && clientProtocols.includes(String(i.protocol || "").toLowerCase())
+    );
   }
   if (!targetInbound) {
-    targetInbound = inbounds.find((i) => i.enable && ["vless", "vmess", "trojan", "wireguard"].includes(i.protocol));
+    targetInbound = inbounds.find(
+      (i) => i.id === 4 && i.enable && clientProtocols.includes(String(i.protocol || "").toLowerCase())
+    );
   }
   if (!targetInbound) {
-    targetInbound = inbounds[0];
+    targetInbound = inbounds.find(
+      (i) => i.enable && clientProtocols.includes(String(i.protocol || "").toLowerCase())
+    );
+  }
+  if (!targetInbound) {
+    targetInbound = inbounds.find((i) => i.enable) || inbounds[0];
   }
   const clientUuid = generateUuid();
   const subId = generateSubId(14);
   const sanitizedEmail = params.email.replace(/[^a-zA-Z0-9_-]/g, "_");
   const clientRemark = `app_${sanitizedEmail}_${subId.slice(0, 4)}`;
-  const isRealityOrTlsVless = targetInbound.protocol === "vless" && (targetInbound.security === "reality" || targetInbound.security === "tls") && targetInbound.network === "tcp";
-  const clientPayload = {
-    id: clientUuid,
-    password: clientUuid,
-    email: clientRemark,
-    flow: isRealityOrTlsVless ? "xtls-rprx-vision" : "",
-    totalGB: params.trafficBytes,
-    expiryTime: params.expiryTimeMs,
-    limitIp: 2,
-    limitHwid: 0,
-    tgId: 0,
-    enable: true,
-    subId
-  };
   let clientCreated = false;
   let panelErrorMsg = "";
-  const tryAddClientToInbound = async (inb) => {
+  let createdPayloadUsed = null;
+  const buildPayloadForInbound = (inb, forceEmptyFlow = false) => {
+    const proto = String(inb.protocol || "").toLowerCase();
+    const sec = String(inb.security || "").toLowerCase();
+    const net = String(inb.network || "").toLowerCase();
+    const existingUsesVision = Array.isArray(inb.clients) && inb.clients.some((c) => c.flow === "xtls-rprx-vision");
+    const shouldUseVision = !forceEmptyFlow && proto === "vless" && net === "tcp" && (sec === "reality" || existingUsesVision);
+    return {
+      id: clientUuid,
+      password: clientUuid,
+      email: clientRemark,
+      flow: shouldUseVision ? "xtls-rprx-vision" : "",
+      totalGB: params.trafficBytes,
+      expiryTime: params.expiryTimeMs,
+      limitIp: 2,
+      limitHwid: 0,
+      tgId: 0,
+      enable: true,
+      subId
+    };
+  };
+  const tryAddClientToInbound = async (inb, forceEmptyFlow = false) => {
+    if (String(inb.protocol || "").toLowerCase() === "wireguard") {
+      panelErrorMsg = `\u067E\u0631\u0648\u062A\u06A9\u0644 WireGuard \u062F\u0631 \u0627\u06CC\u0646\u200C\u0628\u0627\u0646\u062F #${inb.id} \u0627\u0632 \u0627\u0641\u0632\u0648\u062F\u0646 \u06A9\u0644\u0627\u06CC\u0646\u062A \u067E\u0634\u062A\u06CC\u0628\u0627\u0646\u06CC \u0646\u0645\u06CC\u200C\u06A9\u0646\u062F.`;
+      return false;
+    }
+    const payload = buildPayloadForInbound(inb, forceEmptyFlow);
     try {
       const v3Payload = JSON.stringify({
-        client: clientPayload,
+        client: payload,
         inboundIds: [inb.id]
       });
       const v3Res = await sanaeiEngineRef.performHttpRequest(`${session.fullBaseUrl}/panel/api/clients/add`, {
@@ -769,7 +802,10 @@ async function provisionClientOnSanaei(params) {
       });
       if (v3Res.statusCode >= 200 && v3Res.statusCode < 300 && v3Res.body) {
         const parsed = JSON.parse(v3Res.body);
-        if (parsed.success) return true;
+        if (parsed.success) {
+          createdPayloadUsed = payload;
+          return true;
+        }
         if (parsed.msg) panelErrorMsg = parsed.msg;
       }
     } catch (err) {
@@ -777,7 +813,7 @@ async function provisionClientOnSanaei(params) {
     }
     const v2Body = new URLSearchParams({
       id: String(inb.id),
-      settings: JSON.stringify({ clients: [clientPayload] })
+      settings: JSON.stringify({ clients: [payload] })
     }).toString();
     const v2Endpoints = ["/panel/api/inbounds/addClient", "/panel/inbound/addClient", "/xui/inbound/addClient"];
     for (const ep of v2Endpoints) {
@@ -793,7 +829,10 @@ async function provisionClientOnSanaei(params) {
         });
         if (v2Res.statusCode === 200 && v2Res.body) {
           const parsed = JSON.parse(v2Res.body);
-          if (parsed.success) return true;
+          if (parsed.success) {
+            createdPayloadUsed = payload;
+            return true;
+          }
           if (parsed.msg) panelErrorMsg = parsed.msg;
         }
       } catch {
@@ -801,11 +840,16 @@ async function provisionClientOnSanaei(params) {
     }
     return false;
   };
-  clientCreated = await tryAddClientToInbound(targetInbound);
-  if (!clientCreated) {
-    const fallbackInbounds = inbounds.filter((i) => i.id !== targetInbound.id && i.enable);
+  clientCreated = await tryAddClientToInbound(targetInbound, false);
+  if (!clientCreated && String(targetInbound.protocol || "").toLowerCase() === "vless") {
+    clientCreated = await tryAddClientToInbound(targetInbound, true);
+  }
+  if (!clientCreated && !params.strictInbound) {
+    const fallbackInbounds = inbounds.filter(
+      (i) => i.id !== targetInbound.id && i.enable && clientProtocols.includes(String(i.protocol || "").toLowerCase())
+    );
     for (const altInb of fallbackInbounds) {
-      clientCreated = await tryAddClientToInbound(altInb);
+      clientCreated = await tryAddClientToInbound(altInb, false);
       if (clientCreated) {
         targetInbound = altInb;
         break;
@@ -813,11 +857,11 @@ async function provisionClientOnSanaei(params) {
     }
   }
   if (!clientCreated) {
-    throw new Error(panelErrorMsg || "\u062E\u0637\u0627 \u062F\u0631 \u062B\u0628\u062A \u06A9\u0627\u0631\u0628\u0631 \u0631\u0648\u06CC \u0627\u06CC\u0646\u200C\u0628\u0627\u0646\u062F \u067E\u0646\u0644 \u062B\u0646\u0627\u06CC\u06CC.");
+    throw new Error(panelErrorMsg || `\u062E\u0637\u0627 \u062F\u0631 \u062B\u0628\u062A \u06A9\u0627\u0631\u0628\u0631 \u0631\u0648\u06CC \u0627\u06CC\u0646\u200C\u0628\u0627\u0646\u062F #${targetInbound.id} (${targetInbound.remark}) \u062F\u0631 \u067E\u0646\u0644 \u062B\u0646\u0627\u06CC\u06CC.`);
   }
   const freshInbounds = await sanaeiEngineRef.fetchInboundsFromPanel(session, settings.allowInsecure);
-  const updatedInbound = freshInbounds.find((i) => i.id === targetInbound.id) || targetInbound;
-  const createdClient = updatedInbound.clients?.find((c) => c.email === clientRemark || c.id === clientUuid) || clientPayload;
+  const updatedInbound = freshInbounds.find((i) => Number(i.id) === Number(targetInbound.id)) || targetInbound;
+  const createdClient = updatedInbound.clients?.find((c) => c.email === clientRemark || c.id === clientUuid) || createdPayloadUsed;
   const configUri = sanaeiEngineRef.buildClientConfigUri(updatedInbound, createdClient, session.hostname);
   const subUrl = `https://${session.hostname}:2096/sub/${subId}`;
   return {
@@ -857,9 +901,10 @@ function formatServersList(inbounds) {
       port: inb.port,
       pingMs: ping,
       isPro,
-      isOnline: true
+      isOnline: true,
+      supportsSwitch: String(inb.protocol || "").toLowerCase() !== "wireguard"
     };
-  });
+  }).sort((a, b) => Number(b.supportsSwitch !== false) - Number(a.supportsSwitch !== false));
 }
 var BYTES_PER_GB = 1024 * 1024 * 1024;
 function toGB(bytes) {
@@ -1860,8 +1905,8 @@ async function startServer() {
   });
   app.post("/api/bridge/purchase", async (req, res) => {
     try {
-      const { email, userId, planId, inboundId, switchOnly } = req.body;
-      const targetIdentifier = email || userId;
+      const { email, userId, identifier, planId, inboundId, serverId, inbound_id, switchOnly } = req.body;
+      const targetIdentifier = email || userId || identifier;
       if (!targetIdentifier) {
         return res.status(400).json({ success: false, message: "\u0634\u0646\u0627\u0633\u0647 \u06A9\u0627\u0631\u0628\u0631 \u06CC\u0627 \u0627\u06CC\u0645\u06CC\u0644 (email) \u0627\u0644\u0632\u0627\u0645\u06CC \u0627\u0633\u062A." });
       }
@@ -1870,20 +1915,24 @@ async function startServer() {
         user = bridgeStore.createUser({ email: targetIdentifier });
       }
       user = await syncUserSubscriptionWithSanaei(user);
-      const reqInbound = inboundId ? Number(inboundId) : void 0;
+      const rawInbound = inboundId ?? serverId ?? inbound_id;
+      const reqInbound = rawInbound && Number(rawInbound) > 0 ? Number(rawInbound) : void 0;
       if ((switchOnly === true || !planId) && user.subscription && user.subscription.status === "active" && user.subscription.configUri) {
-        if (!reqInbound || reqInbound === user.subscription.inboundId) {
+        if (!reqInbound || reqInbound === Number(user.subscription.inboundId)) {
           return res.json({
             success: true,
             message: "\u0627\u0634\u062A\u0631\u0627\u06A9 \u06A9\u0627\u0631\u0628\u0631 \u062F\u0631 \u062D\u0627\u0644 \u062D\u0627\u0636\u0631 \u0641\u0639\u0627\u0644 \u0627\u0633\u062A \u0648 \u06A9\u0627\u0646\u0641\u06CC\u06AF \u0633\u0631\u0648\u0631 \u062B\u0646\u0627\u06CC\u06CC \u062A\u062D\u0648\u06CC\u0644 \u062F\u0627\u062F\u0647 \u0634\u062F.",
             alreadyActive: true,
+            activeInboundId: user.subscription.inboundId,
+            inboundId: user.subscription.inboundId,
             subscription: user.subscription,
             configUri: user.subscription.configUri,
             subUrl: user.subscription.subUrl,
             user: {
               id: user.id,
               email: user.email,
-              tokens: user.tokens
+              tokens: user.tokens,
+              subscription: user.subscription
             }
           });
         }
@@ -1891,11 +1940,12 @@ async function startServer() {
           const prevSub = { ...user.subscription };
           const switchResult = await provisionClientOnSanaei({
             email: user.email,
-            trafficBytes: user.subscription.trafficRemainingBytes || user.subscription.trafficTotalBytes,
+            trafficBytes: Math.max(1, user.subscription.trafficRemainingBytes || user.subscription.trafficTotalBytes),
             expiryTimeMs: user.subscription.expiryTime,
-            inboundId: reqInbound
+            inboundId: reqInbound,
+            strictInbound: true
           });
-          if (prevSub.inboundId && prevSub.clientUuid) {
+          if (prevSub.inboundId && prevSub.clientUuid && prevSub.clientUuid !== switchResult.client.id) {
             deleteClientFromSanaei({ inboundId: prevSub.inboundId, clientUuid: prevSub.clientUuid }).catch(() => {
             });
           }
@@ -1907,22 +1957,30 @@ async function startServer() {
           user.subscription.clientUuid = switchResult.client.id;
           user.subscription.configUri = switchResult.configUri;
           user.subscription.subUrl = switchResult.subUrl;
+          user.subscription.lastSyncedAt = Date.now();
           bridgeStore.updateUser(user);
           return res.json({
             success: true,
             message: `\u0633\u0631\u0648\u0631 \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u0628\u0647 \xAB${switchResult.inbound.remark}\xBB \u062A\u063A\u06CC\u06CC\u0631 \u06CC\u0627\u0641\u062A.`,
             switched: true,
+            activeInboundId: user.subscription.inboundId,
+            inboundId: user.subscription.inboundId,
             subscription: user.subscription,
             configUri: switchResult.configUri,
             subUrl: switchResult.subUrl,
             user: {
               id: user.id,
               email: user.email,
-              tokens: user.tokens
+              tokens: user.tokens,
+              subscription: user.subscription
             }
           });
         } catch (switchErr) {
-          console.warn("Inbound switch during purchase failed, fallback to existing config:", switchErr);
+          return res.status(400).json({
+            success: false,
+            code: "INBOUND_SWITCH_FAILED",
+            message: switchErr?.message || "\u0627\u0645\u06A9\u0627\u0646 \u0633\u0648\u06CC\u06CC\u0686 \u0631\u0648\u06CC \u0627\u06CC\u0646\u200C\u0628\u0627\u0646\u062F \u0627\u0646\u062A\u062E\u0627\u0628\u06CC \u0648\u062C\u0648\u062F \u0646\u062F\u0627\u0631\u062F."
+          });
         }
       }
       const plan = bridgeStore.getPlanById(planId);
@@ -1993,6 +2051,8 @@ async function startServer() {
         success: true,
         replacedPrevious: Boolean(oldSub && oldSub.planId),
         message: `\u0627\u0634\u062A\u0631\u0627\u06A9 \xAB${plan.name}\xBB \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u0641\u0639\u0627\u0644 \u0634\u062F \u0648 \u06A9\u0627\u0646\u0641\u06CC\u06AF \u0627\u062A\u0635\u0627\u0644 \u0627\u062E\u062A\u0635\u0627\u0635\u06CC \u0635\u0627\u062F\u0631 \u06AF\u0631\u062F\u06CC\u062F.`,
+        activeInboundId: user.subscription.inboundId,
+        inboundId: user.subscription.inboundId,
         subscription: user.subscription,
         hasActiveSubscription: true,
         configUri: provisionResult.configUri,
@@ -2000,7 +2060,8 @@ async function startServer() {
         user: {
           id: user.id,
           email: user.email,
-          tokens: user.tokens
+          tokens: user.tokens,
+          subscription: user.subscription
         }
       });
     } catch (err) {
@@ -2013,10 +2074,12 @@ async function startServer() {
   });
   app.post("/api/bridge/switch-server", async (req, res) => {
     try {
-      const { email, userId, inboundId } = req.body;
-      const targetIdentifier = email || userId;
-      if (!targetIdentifier || !inboundId) {
-        return res.status(400).json({ success: false, message: "\u0634\u0646\u0627\u0633\u0647 \u06A9\u0627\u0631\u0628\u0631 \u0648 \u0634\u0646\u0627\u0633\u0647 \u0627\u06CC\u0646\u200C\u0628\u0627\u0646\u062F (inboundId) \u0627\u0644\u0632\u0627\u0645\u06CC \u0627\u0633\u062A." });
+      const { email, userId, identifier, inboundId, serverId, inbound_id, targetInboundId } = req.body;
+      const targetIdentifier = email || userId || identifier;
+      const rawInboundId = inboundId ?? serverId ?? inbound_id ?? targetInboundId;
+      const reqInbound = Number(rawInboundId);
+      if (!targetIdentifier || !Number.isFinite(reqInbound) || reqInbound <= 0) {
+        return res.status(400).json({ success: false, message: "\u0634\u0646\u0627\u0633\u0647 \u06A9\u0627\u0631\u0628\u0631 \u0648 \u0634\u0646\u0627\u0633\u0647 \u0645\u0639\u062A\u0628\u0631 \u0627\u06CC\u0646\u200C\u0628\u0627\u0646\u062F (inboundId) \u0627\u0644\u0632\u0627\u0645\u06CC \u0627\u0633\u062A." });
       }
       let user = bridgeStore.findUserByIdOrEmail(targetIdentifier);
       if (!user) {
@@ -2031,18 +2094,36 @@ async function startServer() {
           subscription: user.subscription
         });
       }
+      if (reqInbound === Number(user.subscription.inboundId) && user.subscription.configUri) {
+        return res.json({
+          success: true,
+          alreadyOnInbound: true,
+          message: `\u0634\u0645\u0627 \u0647\u0645\u200C\u0627\u06A9\u0646\u0648\u0646 \u0631\u0648\u06CC \u0627\u06CC\u0646\u200C\u0628\u0627\u0646\u062F \xAB${user.subscription.inboundRemark}\xBB (#${user.subscription.inboundId}) \u0647\u0633\u062A\u06CC\u062F.`,
+          activeInboundId: user.subscription.inboundId,
+          inboundId: user.subscription.inboundId,
+          subscription: user.subscription,
+          configUri: user.subscription.configUri,
+          subUrl: user.subscription.subUrl,
+          user: {
+            id: user.id,
+            email: user.email,
+            tokens: user.tokens,
+            subscription: user.subscription
+          }
+        });
+      }
       const prevInboundId = user.subscription.inboundId;
       const prevClientUuid = user.subscription.clientUuid;
       const remainingTrafficBytes = Math.max(
         1,
         user.subscription.trafficRemainingBytes || user.subscription.trafficTotalBytes
       );
-      const reqInbound = Number(inboundId);
       const switchResult = await provisionClientOnSanaei({
         email: user.email,
         trafficBytes: remainingTrafficBytes,
         expiryTimeMs: user.subscription.expiryTime,
-        inboundId: reqInbound
+        inboundId: reqInbound,
+        strictInbound: true
       });
       if (prevInboundId && prevClientUuid && prevClientUuid !== switchResult.client.id) {
         deleteClientFromSanaei({ inboundId: prevInboundId, clientUuid: prevClientUuid }).catch(() => {
@@ -2060,14 +2141,29 @@ async function startServer() {
       bridgeStore.updateUser(user);
       res.json({
         success: true,
+        switched: true,
         message: `\u0633\u0631\u0648\u0631 \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u0628\u0647 \xAB${switchResult.inbound.remark}\xBB \u062A\u063A\u06CC\u06CC\u0631 \u06CC\u0627\u0641\u062A.`,
+        activeInboundId: user.subscription.inboundId,
+        inboundId: user.subscription.inboundId,
         subscription: user.subscription,
         configUri: switchResult.configUri,
-        subUrl: switchResult.subUrl
+        subUrl: switchResult.subUrl,
+        user: {
+          id: user.id,
+          email: user.email,
+          tokens: user.tokens,
+          subscription: user.subscription
+        }
       });
     } catch (err) {
       console.error("Error switching server:", err);
-      res.status(500).json({ success: false, message: err?.message || "\u062E\u0637\u0627 \u062F\u0631 \u062A\u063A\u06CC\u06CC\u0631 \u0633\u0631\u0648\u0631 \u0631\u0648\u06CC \u067E\u0646\u0644 \u062B\u0646\u0627\u06CC\u06CC" });
+      const errMsg = err?.message || "\u062E\u0637\u0627 \u062F\u0631 \u062A\u063A\u06CC\u06CC\u0631 \u0633\u0631\u0648\u0631 \u0631\u0648\u06CC \u067E\u0646\u0644 \u062B\u0646\u0627\u06CC\u06CC";
+      const isClientErr = errMsg.includes("WireGuard") || errMsg.includes("\u0627\u06CC\u0646\u200C\u0628\u0627\u0646\u062F") || errMsg.includes("\u063A\u06CC\u0631\u0641\u0639\u0627\u0644");
+      res.status(isClientErr ? 400 : 500).json({
+        success: false,
+        code: "INBOUND_SWITCH_FAILED",
+        message: errMsg
+      });
     }
   });
   app.post("/api/bridge/admin/plans/add", (req, res) => {
@@ -2141,17 +2237,20 @@ async function startServer() {
     try {
       const inbounds = await getActiveSanaeiInbounds();
       const servers = formatServersList(inbounds);
-      const identifier = req.query.identifier;
-      const user = identifier ? bridgeStore.findUserByIdOrEmail(identifier) : void 0;
-      const activeInboundId = user?.subscription?.inboundId;
+      const identifier = req.query.identifier || req.query.email || req.query.userId;
+      let user = identifier ? bridgeStore.findUserByIdOrEmail(identifier) : void 0;
+      if (user) {
+        user = await syncUserSubscriptionWithSanaei(user, inbounds);
+      }
+      const activeInboundId = user?.subscription?.status === "active" ? user.subscription.inboundId : void 0;
       const formatted = servers.map((s) => ({
         ...s,
-        isSelected: activeInboundId ? s.inboundId === activeInboundId : false
+        isSelected: activeInboundId ? Number(s.inboundId) === Number(activeInboundId) : false
       }));
       res.json({
         success: true,
         servers: formatted,
-        activeInboundId
+        activeInboundId: activeInboundId ?? null
       });
     } catch (err) {
       res.status(500).json({

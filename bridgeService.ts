@@ -42,6 +42,7 @@ export async function provisionClientOnSanaei(params: {
   trafficBytes: number;
   expiryTimeMs: number;
   inboundId?: number;
+  strictInbound?: boolean;
 }): Promise<{
   inbound: any;
   client: any;
@@ -71,19 +72,46 @@ export async function provisionClientOnSanaei(params: {
     throw new Error('هیچ این‌باندی در پنل ثنایی یافت نشد.');
   }
 
-  // Prefer requested inbound, then defaultInboundId or inbound 4, then any active inbound
-  let targetInbound = inbounds.find((i) => i.id === params.inboundId);
+  const clientProtocols = ['vless', 'vmess', 'trojan', 'shadowsocks'];
+  const requestedId =
+    params.inboundId !== undefined && params.inboundId !== null && Number(params.inboundId) > 0
+      ? Number(params.inboundId)
+      : undefined;
+
+  let targetInbound = requestedId ? inbounds.find((i) => Number(i.id) === requestedId) : undefined;
+
+  if (requestedId && params.strictInbound) {
+    if (!targetInbound) {
+      throw new Error(`این‌باند با شناسه #${requestedId} در پنل ثنایی یافت نشد.`);
+    }
+    if (!targetInbound.enable) {
+      throw new Error(`این‌باند «${targetInbound.remark}» (#${requestedId}) در پنل ثنایی غیرفعال است.`);
+    }
+    if (String(targetInbound.protocol || '').toLowerCase() === 'wireguard') {
+      throw new Error(
+        `این‌باند «${targetInbound.remark}» (#${requestedId}) از نوع WireGuard است و از ساخت کلاینت خودکار VLESS/VMess پشتیبانی نمی‌کند. لطفاً یکی از این‌باندهای VLESS یا VMess را انتخاب کنید.`
+      );
+    }
+  }
+
+  // Fallback automatic inbound selection ONLY when no strict inbound was requested
   if (!targetInbound) {
-    targetInbound = inbounds.find((i) => i.id === 4 && i.enable);
+    targetInbound = inbounds.find(
+      (i) => i.id === settings.defaultInboundId && i.enable && clientProtocols.includes(String(i.protocol || '').toLowerCase())
+    );
   }
   if (!targetInbound) {
-    targetInbound = inbounds.find((i) => i.id === settings.defaultInboundId && i.enable);
+    targetInbound = inbounds.find(
+      (i) => i.id === 4 && i.enable && clientProtocols.includes(String(i.protocol || '').toLowerCase())
+    );
   }
   if (!targetInbound) {
-    targetInbound = inbounds.find((i) => i.enable && ['vless', 'vmess', 'trojan', 'wireguard'].includes(i.protocol));
+    targetInbound = inbounds.find(
+      (i) => i.enable && clientProtocols.includes(String(i.protocol || '').toLowerCase())
+    );
   }
   if (!targetInbound) {
-    targetInbound = inbounds[0];
+    targetInbound = inbounds.find((i) => i.enable) || inbounds[0];
   }
 
   const clientUuid = generateUuid();
@@ -91,34 +119,47 @@ export async function provisionClientOnSanaei(params: {
   const sanitizedEmail = params.email.replace(/[^a-zA-Z0-9_-]/g, '_');
   const clientRemark = `app_${sanitizedEmail}_${subId.slice(0, 4)}`;
 
-  const isRealityOrTlsVless =
-    targetInbound.protocol === 'vless' &&
-    (targetInbound.security === 'reality' || targetInbound.security === 'tls') &&
-    targetInbound.network === 'tcp';
-
-  const clientPayload = {
-    id: clientUuid,
-    password: clientUuid,
-    email: clientRemark,
-    flow: isRealityOrTlsVless ? 'xtls-rprx-vision' : '',
-    totalGB: params.trafficBytes,
-    expiryTime: params.expiryTimeMs,
-    limitIp: 2,
-    limitHwid: 0,
-    tgId: 0,
-    enable: true,
-    subId,
-  };
-
   let clientCreated = false;
   let panelErrorMsg = '';
+  let createdPayloadUsed: any = null;
+
+  const buildPayloadForInbound = (inb: any, forceEmptyFlow = false) => {
+    const proto = String(inb.protocol || '').toLowerCase();
+    const sec = String(inb.security || '').toLowerCase();
+    const net = String(inb.network || '').toLowerCase();
+    const existingUsesVision =
+      Array.isArray(inb.clients) && inb.clients.some((c: any) => c.flow === 'xtls-rprx-vision');
+    const shouldUseVision =
+      !forceEmptyFlow && proto === 'vless' && net === 'tcp' && (sec === 'reality' || existingUsesVision);
+
+    return {
+      id: clientUuid,
+      password: clientUuid,
+      email: clientRemark,
+      flow: shouldUseVision ? 'xtls-rprx-vision' : '',
+      totalGB: params.trafficBytes,
+      expiryTime: params.expiryTimeMs,
+      limitIp: 2,
+      limitHwid: 0,
+      tgId: 0,
+      enable: true,
+      subId,
+    };
+  };
 
   // Helper to attempt adding client to a specific inbound via v3 and v2 APIs
-  const tryAddClientToInbound = async (inb: any): Promise<boolean> => {
+  const tryAddClientToInbound = async (inb: any, forceEmptyFlow = false): Promise<boolean> => {
+    if (String(inb.protocol || '').toLowerCase() === 'wireguard') {
+      panelErrorMsg = `پروتکل WireGuard در این‌باند #${inb.id} از افزودن کلاینت پشتیبانی نمی‌کند.`;
+      return false;
+    }
+
+    const payload = buildPayloadForInbound(inb, forceEmptyFlow);
+
     // 1. Try v3 API
     try {
       const v3Payload = JSON.stringify({
-        client: clientPayload,
+        client: payload,
         inboundIds: [inb.id],
       });
       const v3Res = await sanaeiEngineRef!.performHttpRequest(`${session.fullBaseUrl}/panel/api/clients/add`, {
@@ -133,7 +174,10 @@ export async function provisionClientOnSanaei(params: {
 
       if (v3Res.statusCode >= 200 && v3Res.statusCode < 300 && v3Res.body) {
         const parsed = JSON.parse(v3Res.body);
-        if (parsed.success) return true;
+        if (parsed.success) {
+          createdPayloadUsed = payload;
+          return true;
+        }
         if (parsed.msg) panelErrorMsg = parsed.msg;
       }
     } catch (err: any) {
@@ -143,7 +187,7 @@ export async function provisionClientOnSanaei(params: {
     // 2. Try v2 API
     const v2Body = new URLSearchParams({
       id: String(inb.id),
-      settings: JSON.stringify({ clients: [clientPayload] }),
+      settings: JSON.stringify({ clients: [payload] }),
     }).toString();
 
     const v2Endpoints = ['/panel/api/inbounds/addClient', '/panel/inbound/addClient', '/xui/inbound/addClient'];
@@ -160,7 +204,10 @@ export async function provisionClientOnSanaei(params: {
         });
         if (v2Res.statusCode === 200 && v2Res.body) {
           const parsed = JSON.parse(v2Res.body);
-          if (parsed.success) return true;
+          if (parsed.success) {
+            createdPayloadUsed = payload;
+            return true;
+          }
           if (parsed.msg) panelErrorMsg = parsed.msg;
         }
       } catch {
@@ -170,14 +217,19 @@ export async function provisionClientOnSanaei(params: {
     return false;
   };
 
-  // Try targeted inbound first
-  clientCreated = await tryAddClientToInbound(targetInbound);
+  // Try targeted inbound first (and retry with empty flow if flow was rejected)
+  clientCreated = await tryAddClientToInbound(targetInbound, false);
+  if (!clientCreated && String(targetInbound.protocol || '').toLowerCase() === 'vless') {
+    clientCreated = await tryAddClientToInbound(targetInbound, true);
+  }
 
-  // If failed, try other enabled inbounds automatically
-  if (!clientCreated) {
-    const fallbackInbounds = inbounds.filter((i) => i.id !== targetInbound.id && i.enable);
+  // Only fall back to other enabled inbounds if strictInbound is NOT set
+  if (!clientCreated && !params.strictInbound) {
+    const fallbackInbounds = inbounds.filter(
+      (i) => i.id !== targetInbound.id && i.enable && clientProtocols.includes(String(i.protocol || '').toLowerCase())
+    );
     for (const altInb of fallbackInbounds) {
-      clientCreated = await tryAddClientToInbound(altInb);
+      clientCreated = await tryAddClientToInbound(altInb, false);
       if (clientCreated) {
         targetInbound = altInb;
         break;
@@ -186,14 +238,14 @@ export async function provisionClientOnSanaei(params: {
   }
 
   if (!clientCreated) {
-    throw new Error(panelErrorMsg || 'خطا در ثبت کاربر روی این‌باند پنل ثنایی.');
+    throw new Error(panelErrorMsg || `خطا در ثبت کاربر روی این‌باند #${targetInbound.id} (${targetInbound.remark}) در پنل ثنایی.`);
   }
 
   // Fetch updated inbounds to extract the exact URI generated by Sanaei
   const freshInbounds = await sanaeiEngineRef.fetchInboundsFromPanel(session, settings.allowInsecure);
-  const updatedInbound = freshInbounds.find((i) => i.id === targetInbound.id) || targetInbound;
+  const updatedInbound = freshInbounds.find((i) => Number(i.id) === Number(targetInbound.id)) || targetInbound;
   const createdClient =
-    updatedInbound.clients?.find((c: any) => c.email === clientRemark || c.id === clientUuid) || clientPayload;
+    updatedInbound.clients?.find((c: any) => c.email === clientRemark || c.id === clientUuid) || createdPayloadUsed;
 
   const configUri = sanaeiEngineRef.buildClientConfigUri(updatedInbound, createdClient, session.hostname);
   const subUrl = `https://${session.hostname}:2096/sub/${subId}`;
@@ -241,8 +293,10 @@ export function formatServersList(inbounds: any[]): BridgeServerItem[] {
         pingMs: ping,
         isPro,
         isOnline: true,
+        supportsSwitch: String(inb.protocol || '').toLowerCase() !== 'wireguard',
       };
-    });
+    })
+    .sort((a, b) => Number(b.supportsSwitch !== false) - Number(a.supportsSwitch !== false));
 }
 
 const BYTES_PER_GB = 1024 * 1024 * 1024;

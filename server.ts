@@ -1101,8 +1101,8 @@ async function startServer() {
   // 5. Purchase / Activate New Subscription (Replaces expired or previous plan cleanly)
   app.post('/api/bridge/purchase', async (req, res) => {
     try {
-      const { email, userId, planId, inboundId, switchOnly } = req.body;
-      const targetIdentifier = email || userId;
+      const { email, userId, identifier, planId, inboundId, serverId, inbound_id, switchOnly } = req.body;
+      const targetIdentifier = email || userId || identifier;
 
       if (!targetIdentifier) {
         return res.status(400).json({ success: false, message: 'شناسه کاربر یا ایمیل (email) الزامی است.' });
@@ -1116,7 +1116,8 @@ async function startServer() {
 
       // Always sync live traffic & expiry with Sanaei first
       user = await syncUserSubscriptionWithSanaei(user);
-      const reqInbound = inboundId ? Number(inboundId) : undefined;
+      const rawInbound = inboundId ?? serverId ?? inbound_id;
+      const reqInbound = rawInbound && Number(rawInbound) > 0 ? Number(rawInbound) : undefined;
 
       // Only treat as a server-switch (without buying a new plan) if explicitly requested via switchOnly OR no planId was provided
       if (
@@ -1125,11 +1126,13 @@ async function startServer() {
         user.subscription.status === 'active' &&
         user.subscription.configUri
       ) {
-        if (!reqInbound || reqInbound === user.subscription.inboundId) {
+        if (!reqInbound || reqInbound === Number(user.subscription.inboundId)) {
           return res.json({
             success: true,
             message: 'اشتراک کاربر در حال حاضر فعال است و کانفیگ سرور ثنایی تحویل داده شد.',
             alreadyActive: true,
+            activeInboundId: user.subscription.inboundId,
+            inboundId: user.subscription.inboundId,
             subscription: user.subscription,
             configUri: user.subscription.configUri,
             subUrl: user.subscription.subUrl,
@@ -1137,21 +1140,23 @@ async function startServer() {
               id: user.id,
               email: user.email,
               tokens: user.tokens,
+              subscription: user.subscription,
             },
           });
         }
 
-        // Switch server using remaining traffic & remaining expiry
+        // Switch server using remaining traffic & remaining expiry with strictInbound=true
         try {
           const prevSub = { ...user.subscription };
           const switchResult = await provisionClientOnSanaei({
             email: user.email,
-            trafficBytes: user.subscription.trafficRemainingBytes || user.subscription.trafficTotalBytes,
+            trafficBytes: Math.max(1, user.subscription.trafficRemainingBytes || user.subscription.trafficTotalBytes),
             expiryTimeMs: user.subscription.expiryTime,
             inboundId: reqInbound,
+            strictInbound: true,
           });
 
-          if (prevSub.inboundId && prevSub.clientUuid) {
+          if (prevSub.inboundId && prevSub.clientUuid && prevSub.clientUuid !== switchResult.client.id) {
             deleteClientFromSanaei({ inboundId: prevSub.inboundId, clientUuid: prevSub.clientUuid }).catch(() => {});
           }
 
@@ -1163,12 +1168,15 @@ async function startServer() {
           user.subscription.clientUuid = switchResult.client.id;
           user.subscription.configUri = switchResult.configUri;
           user.subscription.subUrl = switchResult.subUrl;
+          user.subscription.lastSyncedAt = Date.now();
           bridgeStore.updateUser(user);
 
           return res.json({
             success: true,
             message: `سرور با موفقیت به «${switchResult.inbound.remark}» تغییر یافت.`,
             switched: true,
+            activeInboundId: user.subscription.inboundId,
+            inboundId: user.subscription.inboundId,
             subscription: user.subscription,
             configUri: switchResult.configUri,
             subUrl: switchResult.subUrl,
@@ -1176,10 +1184,15 @@ async function startServer() {
               id: user.id,
               email: user.email,
               tokens: user.tokens,
+              subscription: user.subscription,
             },
           });
         } catch (switchErr: any) {
-          console.warn('Inbound switch during purchase failed, fallback to existing config:', switchErr);
+          return res.status(400).json({
+            success: false,
+            code: 'INBOUND_SWITCH_FAILED',
+            message: switchErr?.message || 'امکان سوییچ روی این‌باند انتخابی وجود ندارد.',
+          });
         }
       }
 
@@ -1263,6 +1276,8 @@ async function startServer() {
         success: true,
         replacedPrevious: Boolean(oldSub && oldSub.planId),
         message: `اشتراک «${plan.name}» با موفقیت فعال شد و کانفیگ اتصال اختصاصی صادر گردید.`,
+        activeInboundId: user.subscription.inboundId,
+        inboundId: user.subscription.inboundId,
         subscription: user.subscription,
         hasActiveSubscription: true,
         configUri: provisionResult.configUri,
@@ -1271,6 +1286,7 @@ async function startServer() {
           id: user.id,
           email: user.email,
           tokens: user.tokens,
+          subscription: user.subscription,
         },
       });
     } catch (err: any) {
@@ -1285,10 +1301,13 @@ async function startServer() {
   // 5.1. Dedicated Server Switch Endpoint (App selects a different server location)
   app.post('/api/bridge/switch-server', async (req, res) => {
     try {
-      const { email, userId, inboundId } = req.body;
-      const targetIdentifier = email || userId;
-      if (!targetIdentifier || !inboundId) {
-        return res.status(400).json({ success: false, message: 'شناسه کاربر و شناسه این‌باند (inboundId) الزامی است.' });
+      const { email, userId, identifier, inboundId, serverId, inbound_id, targetInboundId } = req.body;
+      const targetIdentifier = email || userId || identifier;
+      const rawInboundId = inboundId ?? serverId ?? inbound_id ?? targetInboundId;
+      const reqInbound = Number(rawInboundId);
+
+      if (!targetIdentifier || !Number.isFinite(reqInbound) || reqInbound <= 0) {
+        return res.status(400).json({ success: false, message: 'شناسه کاربر و شناسه معتبر این‌باند (inboundId) الزامی است.' });
       }
 
       let user = bridgeStore.findUserByIdOrEmail(targetIdentifier);
@@ -1307,6 +1326,25 @@ async function startServer() {
         });
       }
 
+      if (reqInbound === Number(user.subscription.inboundId) && user.subscription.configUri) {
+        return res.json({
+          success: true,
+          alreadyOnInbound: true,
+          message: `شما هم‌اکنون روی این‌باند «${user.subscription.inboundRemark}» (#${user.subscription.inboundId}) هستید.`,
+          activeInboundId: user.subscription.inboundId,
+          inboundId: user.subscription.inboundId,
+          subscription: user.subscription,
+          configUri: user.subscription.configUri,
+          subUrl: user.subscription.subUrl,
+          user: {
+            id: user.id,
+            email: user.email,
+            tokens: user.tokens,
+            subscription: user.subscription,
+          },
+        });
+      }
+
       const prevInboundId = user.subscription.inboundId;
       const prevClientUuid = user.subscription.clientUuid;
       const remainingTrafficBytes = Math.max(
@@ -1314,12 +1352,12 @@ async function startServer() {
         user.subscription.trafficRemainingBytes || user.subscription.trafficTotalBytes
       );
 
-      const reqInbound = Number(inboundId);
       const switchResult = await provisionClientOnSanaei({
         email: user.email,
         trafficBytes: remainingTrafficBytes,
         expiryTimeMs: user.subscription.expiryTime,
         inboundId: reqInbound,
+        strictInbound: true,
       });
 
       if (prevInboundId && prevClientUuid && prevClientUuid !== switchResult.client.id) {
@@ -1339,14 +1377,30 @@ async function startServer() {
 
       res.json({
         success: true,
+        switched: true,
         message: `سرور با موفقیت به «${switchResult.inbound.remark}» تغییر یافت.`,
+        activeInboundId: user.subscription.inboundId,
+        inboundId: user.subscription.inboundId,
         subscription: user.subscription,
         configUri: switchResult.configUri,
         subUrl: switchResult.subUrl,
+        user: {
+          id: user.id,
+          email: user.email,
+          tokens: user.tokens,
+          subscription: user.subscription,
+        },
       });
     } catch (err: any) {
       console.error('Error switching server:', err);
-      res.status(500).json({ success: false, message: err?.message || 'خطا در تغییر سرور روی پنل ثنایی' });
+      const errMsg = err?.message || 'خطا در تغییر سرور روی پنل ثنایی';
+      const isClientErr =
+        errMsg.includes('WireGuard') || errMsg.includes('این‌باند') || errMsg.includes('غیرفعال');
+      res.status(isClientErr ? 400 : 500).json({
+        success: false,
+        code: 'INBOUND_SWITCH_FAILED',
+        message: errMsg,
+      });
     }
   });
 
@@ -1428,19 +1482,23 @@ async function startServer() {
     try {
       const inbounds = await getActiveSanaeiInbounds();
       const servers = formatServersList(inbounds);
-      const identifier = req.query.identifier as string;
-      const user = identifier ? bridgeStore.findUserByIdOrEmail(identifier) : undefined;
-      const activeInboundId = user?.subscription?.inboundId;
+      const identifier = (req.query.identifier || req.query.email || req.query.userId) as string;
+      let user = identifier ? bridgeStore.findUserByIdOrEmail(identifier) : undefined;
+      if (user) {
+        user = await syncUserSubscriptionWithSanaei(user, inbounds);
+      }
+      const activeInboundId =
+        user?.subscription?.status === 'active' ? user.subscription.inboundId : undefined;
 
       const formatted = servers.map((s) => ({
         ...s,
-        isSelected: activeInboundId ? s.inboundId === activeInboundId : false,
+        isSelected: activeInboundId ? Number(s.inboundId) === Number(activeInboundId) : false,
       }));
 
       res.json({
         success: true,
         servers: formatted,
-        activeInboundId,
+        activeInboundId: activeInboundId ?? null,
       });
     } catch (err: any) {
       res.status(500).json({
