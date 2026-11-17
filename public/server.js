@@ -861,6 +861,140 @@ function formatServersList(inbounds) {
     };
   });
 }
+var BYTES_PER_GB = 1024 * 1024 * 1024;
+function toGB(bytes) {
+  return Number((Math.max(0, bytes) / BYTES_PER_GB).toFixed(2));
+}
+async function deleteClientFromSanaei(params) {
+  if (!sanaeiEngineRef || !params.inboundId || !params.clientUuid) return;
+  const settings = bridgeStore.getSettings();
+  if (!settings.sanaeiPanelUrl || !settings.sanaeiPanelUrl.trim()) return;
+  try {
+    const session = await sanaeiEngineRef.authenticatePanel({
+      panelUrl: settings.sanaeiPanelUrl,
+      webBasePath: settings.sanaeiWebBasePath,
+      username: settings.sanaeiUsername,
+      password: settings.sanaeiPassword,
+      allowInsecure: settings.allowInsecure
+    });
+    const endpoints = [
+      `${session.fullBaseUrl}/panel/api/inbounds/${params.inboundId}/delClient/${params.clientUuid}`,
+      `${session.fullBaseUrl}/panel/inbound/${params.inboundId}/delClient/${params.clientUuid}`
+    ];
+    for (const url of endpoints) {
+      try {
+        const res = await sanaeiEngineRef.performHttpRequest(url, {
+          method: "POST",
+          headers: sanaeiEngineRef.buildAuthHeaders(session),
+          allowInsecure: settings.allowInsecure,
+          timeoutMs: 6e3
+        });
+        if (res.statusCode === 200) break;
+      } catch {
+      }
+    }
+  } catch {
+  }
+}
+async function syncUserSubscriptionWithSanaei(user, cachedInbounds) {
+  const sub = user.subscription;
+  if (!sub || sub.status === "none" || !sub.planId) {
+    return user;
+  }
+  let dirty = false;
+  const prevStatus = sub.status;
+  const prevUsed = Number(sub.trafficUsedBytes || 0);
+  const prevRem = Number(sub.trafficRemainingBytes || 0);
+  const prevDays = Number(sub.remainingDays || 0);
+  let inbounds = [];
+  if (Array.isArray(cachedInbounds)) {
+    inbounds = cachedInbounds;
+  } else {
+    inbounds = await getActiveSanaeiInbounds();
+  }
+  let matchedClient = null;
+  let matchedInbound = null;
+  if (inbounds.length > 0) {
+    const preferredInb = inbounds.find((i) => i.id === sub.inboundId);
+    const searchOrder = preferredInb ? [preferredInb, ...inbounds.filter((i) => i.id !== sub.inboundId)] : inbounds;
+    for (const inb of searchOrder) {
+      const clients = Array.isArray(inb.clients) ? inb.clients : [];
+      const found = clients.find(
+        (c) => sub.clientUuid && c.id === sub.clientUuid || sub.clientEmail && c.email === sub.clientEmail
+      );
+      if (found) {
+        matchedClient = found;
+        matchedInbound = inb;
+        break;
+      }
+    }
+  }
+  let totalBytes = Number(sub.trafficTotalBytes || (sub.trafficTotalGB || 0) * BYTES_PER_GB);
+  let usedBytes = Number(sub.trafficUsedBytes || 0);
+  let expiryTime = Number(sub.expiryTime || 0);
+  let clientDisabled = false;
+  let clientDeleted = false;
+  if (matchedClient) {
+    usedBytes = (Number(matchedClient.up) || 0) + (Number(matchedClient.down) || 0);
+    if (Number(matchedClient.totalGB) > 0) {
+      totalBytes = Number(matchedClient.totalGB);
+    }
+    if (Number(matchedClient.expiryTime) > 0) {
+      expiryTime = Number(matchedClient.expiryTime);
+    }
+    if (matchedClient.enable === false || matchedInbound?.enable === false) {
+      clientDisabled = true;
+    }
+  } else if (inbounds.length > 0 && sub.status === "active" && sub.clientUuid && (!sub.subscribedAt || Date.now() - sub.subscribedAt > 3e4)) {
+    clientDeleted = true;
+  }
+  const remainingBytes = totalBytes > 0 ? Math.max(0, totalBytes - usedBytes) : Math.max(0, Number(sub.trafficRemainingBytes || 0));
+  const now = Date.now();
+  const diffMs = expiryTime > 0 ? expiryTime - now : 1;
+  const remainingDays = expiryTime > 0 ? Math.max(0, Math.ceil(diffMs / (24 * 60 * 60 * 1e3))) : sub.remainingDays;
+  let expiredReason = "none";
+  if (clientDeleted) {
+    expiredReason = "deleted_from_panel";
+  } else if (clientDisabled) {
+    expiredReason = "disabled_on_panel";
+  } else if (expiryTime > 0 && diffMs <= 0) {
+    expiredReason = "time_expired";
+  } else if (totalBytes > 0 && remainingBytes <= 0) {
+    expiredReason = "traffic_exhausted";
+  }
+  const isExpired = expiredReason !== "none" || sub.status === "expired";
+  if (isExpired && expiredReason === "none") {
+    expiredReason = totalBytes > 0 && remainingBytes <= 0 ? "traffic_exhausted" : "time_expired";
+  }
+  sub.trafficTotalBytes = totalBytes;
+  sub.trafficTotalGB = toGB(totalBytes);
+  sub.trafficUsedBytes = usedBytes;
+  sub.trafficUsedGB = toGB(usedBytes);
+  sub.trafficRemainingBytes = isExpired && expiredReason === "traffic_exhausted" ? 0 : remainingBytes;
+  sub.trafficRemainingGB = toGB(sub.trafficRemainingBytes);
+  sub.trafficUsedPercent = totalBytes > 0 ? Math.min(100, Math.round(usedBytes / totalBytes * 100)) : 0;
+  sub.expiryTime = expiryTime;
+  sub.remainingDays = isExpired && expiredReason === "time_expired" ? 0 : remainingDays;
+  sub.lastSyncedAt = now;
+  if (isExpired) {
+    sub.status = "expired";
+    sub.isExpired = true;
+    sub.expiredReason = expiredReason;
+    sub.configUri = "";
+    sub.subUrl = "";
+  } else {
+    sub.status = "active";
+    sub.isExpired = false;
+    sub.expiredReason = "none";
+  }
+  if (prevStatus !== sub.status || prevUsed !== sub.trafficUsedBytes || prevRem !== sub.trafficRemainingBytes || prevDays !== sub.remainingDays) {
+    dirty = true;
+  }
+  if (dirty) {
+    bridgeStore.updateUser(user);
+  }
+  return user;
+}
 
 // server.ts
 var __filename = fileURLToPath2(import.meta.url);
@@ -1618,8 +1752,10 @@ async function startServer() {
           deviceId: deviceId || ""
         });
         isNewUser = true;
+      } else {
+        user = await syncUserSubscriptionWithSanaei(user);
       }
-      if (autoSubscribePlanId) {
+      if (autoSubscribePlanId && (!user.subscription || user.subscription.status !== "active")) {
         const plan = bridgeStore.getPlanById(autoSubscribePlanId);
         if (plan) {
           const trafficBytes = plan.trafficGB * 1024 * 1024 * 1024;
@@ -1637,9 +1773,15 @@ async function startServer() {
             trafficTotalGB: plan.trafficGB,
             trafficTotalBytes: trafficBytes,
             trafficUsedBytes: 0,
+            trafficUsedGB: 0,
             trafficRemainingBytes: trafficBytes,
+            trafficRemainingGB: plan.trafficGB,
+            trafficUsedPercent: 0,
             expiryTime: expiryTimeMs,
             remainingDays: plan.periodDays,
+            isExpired: false,
+            expiredReason: "none",
+            lastSyncedAt: Date.now(),
             clientEmail: provisionResult.client.email,
             clientUuid: provisionResult.client.id,
             inboundId: provisionResult.inbound.id,
@@ -1656,14 +1798,15 @@ async function startServer() {
           bridgeStore.updateUser(user);
         }
       }
+      const isSubActive = user.subscription?.status === "active";
       res.json({
         success: true,
         message: isNewUser ? "\u062B\u0628\u062A\u200C\u0646\u0627\u0645 \u06A9\u0627\u0631\u0628\u0631 \u062F\u0631 \u0633\u06CC\u0633\u062A\u0645 \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u0627\u0646\u062C\u0627\u0645 \u0634\u062F." : "\u06A9\u0627\u0631\u0628\u0631 \u062F\u0631 \u0633\u06CC\u0633\u062A\u0645 \u06CC\u0627\u0641\u062A \u0634\u062F.",
         isNewUser,
         user,
         subscription: user.subscription,
-        configUri: user.subscription?.configUri || "",
-        hasActiveSubscription: user.subscription?.status === "active",
+        configUri: isSubActive ? user.subscription?.configUri || "" : "",
+        hasActiveSubscription: isSubActive,
         availablePlans: bridgeStore.getPlans()
       });
     } catch (err) {
@@ -1673,12 +1816,12 @@ async function startServer() {
       });
     }
   });
-  app.post("/api/bridge/login", (req, res) => {
+  app.post("/api/bridge/login", async (req, res) => {
     const { email, deviceId } = req.body;
     if (!email) {
       return res.status(400).json({ success: false, message: "\u0627\u06CC\u0645\u06CC\u0644 \u06CC\u0627 \u0646\u0627\u0645 \u06A9\u0627\u0631\u0628\u0631\u06CC \u0627\u0644\u0632\u0627\u0645\u06CC \u0627\u0633\u062A." });
     }
-    const user = bridgeStore.findUserByIdOrEmail(email);
+    let user = bridgeStore.findUserByIdOrEmail(email);
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -1689,35 +1832,35 @@ async function startServer() {
       user.deviceId = deviceId;
       bridgeStore.updateUser(user);
     }
+    user = await syncUserSubscriptionWithSanaei(user);
+    const isSubActive = user.subscription?.status === "active";
     res.json({
       success: true,
       user,
       subscription: user.subscription,
-      configUri: user.subscription?.configUri || "",
-      hasActiveSubscription: user.subscription?.status === "active",
+      configUri: isSubActive ? user.subscription?.configUri || "" : "",
+      hasActiveSubscription: isSubActive,
       plans: bridgeStore.getPlans()
     });
   });
-  app.get("/api/bridge/user/:identifier", (req, res) => {
-    const user = bridgeStore.findUserByIdOrEmail(req.params.identifier);
+  app.get("/api/bridge/user/:identifier", async (req, res) => {
+    let user = bridgeStore.findUserByIdOrEmail(req.params.identifier);
     if (!user) {
       return res.status(404).json({ success: false, message: "\u06A9\u0627\u0631\u0628\u0631 \u06CC\u0627\u0641\u062A \u0646\u0634\u062F." });
     }
-    if (user.subscription && user.subscription.status === "active" && user.subscription.expiryTime > 0) {
-      const diffMs = user.subscription.expiryTime - Date.now();
-      user.subscription.remainingDays = Math.max(0, Math.ceil(diffMs / (24 * 60 * 60 * 1e3)));
-      if (diffMs <= 0) {
-        user.subscription.status = "expired";
-      }
-    }
+    user = await syncUserSubscriptionWithSanaei(user);
+    const isSubActive = user.subscription?.status === "active";
     res.json({
       success: true,
-      user
+      user,
+      subscription: user.subscription,
+      hasActiveSubscription: isSubActive,
+      configUri: isSubActive ? user.subscription?.configUri || "" : ""
     });
   });
   app.post("/api/bridge/purchase", async (req, res) => {
     try {
-      const { email, userId, planId, inboundId } = req.body;
+      const { email, userId, planId, inboundId, switchOnly } = req.body;
       const targetIdentifier = email || userId;
       if (!targetIdentifier) {
         return res.status(400).json({ success: false, message: "\u0634\u0646\u0627\u0633\u0647 \u06A9\u0627\u0631\u0628\u0631 \u06CC\u0627 \u0627\u06CC\u0645\u06CC\u0644 (email) \u0627\u0644\u0632\u0627\u0645\u06CC \u0627\u0633\u062A." });
@@ -1726,8 +1869,9 @@ async function startServer() {
       if (!user) {
         user = bridgeStore.createUser({ email: targetIdentifier });
       }
+      user = await syncUserSubscriptionWithSanaei(user);
       const reqInbound = inboundId ? Number(inboundId) : void 0;
-      if (user.subscription && user.subscription.status === "active" && user.subscription.configUri) {
+      if ((switchOnly === true || !planId) && user.subscription && user.subscription.status === "active" && user.subscription.configUri) {
         if (!reqInbound || reqInbound === user.subscription.inboundId) {
           return res.json({
             success: true,
@@ -1744,16 +1888,23 @@ async function startServer() {
           });
         }
         try {
+          const prevSub = { ...user.subscription };
           const switchResult = await provisionClientOnSanaei({
             email: user.email,
             trafficBytes: user.subscription.trafficRemainingBytes || user.subscription.trafficTotalBytes,
             expiryTimeMs: user.subscription.expiryTime,
             inboundId: reqInbound
           });
+          if (prevSub.inboundId && prevSub.clientUuid) {
+            deleteClientFromSanaei({ inboundId: prevSub.inboundId, clientUuid: prevSub.clientUuid }).catch(() => {
+            });
+          }
           user.subscription.inboundId = switchResult.inbound.id;
           user.subscription.inboundRemark = switchResult.inbound.remark;
           user.subscription.inboundProtocol = switchResult.inbound.protocol;
           user.subscription.inboundPort = switchResult.inbound.port;
+          user.subscription.clientEmail = switchResult.client.email;
+          user.subscription.clientUuid = switchResult.client.id;
           user.subscription.configUri = switchResult.configUri;
           user.subscription.subUrl = switchResult.subUrl;
           bridgeStore.updateUser(user);
@@ -1797,6 +1948,11 @@ async function startServer() {
         expiryTimeMs,
         inboundId: reqInbound || plan.inboundId
       });
+      const oldSub = user.subscription;
+      if (oldSub && oldSub.inboundId && oldSub.clientUuid && oldSub.clientUuid !== provisionResult.client.id) {
+        deleteClientFromSanaei({ inboundId: oldSub.inboundId, clientUuid: oldSub.clientUuid }).catch(() => {
+        });
+      }
       if (plan.priceTokens > 0) {
         user.tokens = Math.max(0, user.tokens - plan.priceTokens);
         bridgeStore.addTransaction({
@@ -1813,9 +1969,15 @@ async function startServer() {
         trafficTotalGB: plan.trafficGB,
         trafficTotalBytes: trafficBytes,
         trafficUsedBytes: 0,
+        trafficUsedGB: 0,
         trafficRemainingBytes: trafficBytes,
+        trafficRemainingGB: plan.trafficGB,
+        trafficUsedPercent: 0,
         expiryTime: expiryTimeMs,
         remainingDays: plan.periodDays,
+        isExpired: false,
+        expiredReason: "none",
+        lastSyncedAt: Date.now(),
         clientEmail: provisionResult.client.email,
         clientUuid: provisionResult.client.id,
         inboundId: provisionResult.inbound.id,
@@ -1829,8 +1991,10 @@ async function startServer() {
       bridgeStore.updateUser(user);
       res.json({
         success: true,
+        replacedPrevious: Boolean(oldSub && oldSub.planId),
         message: `\u0627\u0634\u062A\u0631\u0627\u06A9 \xAB${plan.name}\xBB \u0628\u0627 \u0645\u0648\u0641\u0642\u06CC\u062A \u0641\u0639\u0627\u0644 \u0634\u062F \u0648 \u06A9\u0627\u0646\u0641\u06CC\u06AF \u0627\u062A\u0635\u0627\u0644 \u0627\u062E\u062A\u0635\u0627\u0635\u06CC \u0635\u0627\u062F\u0631 \u06AF\u0631\u062F\u06CC\u062F.`,
         subscription: user.subscription,
+        hasActiveSubscription: true,
         configUri: provisionResult.configUri,
         subUrl: provisionResult.subUrl,
         user: {
@@ -1854,26 +2018,45 @@ async function startServer() {
       if (!targetIdentifier || !inboundId) {
         return res.status(400).json({ success: false, message: "\u0634\u0646\u0627\u0633\u0647 \u06A9\u0627\u0631\u0628\u0631 \u0648 \u0634\u0646\u0627\u0633\u0647 \u0627\u06CC\u0646\u200C\u0628\u0627\u0646\u062F (inboundId) \u0627\u0644\u0632\u0627\u0645\u06CC \u0627\u0633\u062A." });
       }
-      const user = bridgeStore.findUserByIdOrEmail(targetIdentifier);
+      let user = bridgeStore.findUserByIdOrEmail(targetIdentifier);
       if (!user) {
         return res.status(404).json({ success: false, message: "\u06A9\u0627\u0631\u0628\u0631 \u06CC\u0627\u0641\u062A \u0646\u0634\u062F." });
       }
+      user = await syncUserSubscriptionWithSanaei(user);
       if (!user.subscription || user.subscription.status !== "active") {
-        return res.status(400).json({ success: false, message: "\u06A9\u0627\u0631\u0628\u0631 \u0627\u0634\u062A\u0631\u0627\u06A9 \u0641\u0639\u0627\u0644\u06CC \u0646\u062F\u0627\u0631\u062F. \u0627\u0628\u062A\u062F\u0627 \u0627\u0634\u062A\u0631\u0627\u06A9 \u062A\u0647\u06CC\u0647 \u06A9\u0646\u06CC\u062F." });
+        return res.status(400).json({
+          success: false,
+          code: "SUBSCRIPTION_EXPIRED",
+          message: "\u0627\u0634\u062A\u0631\u0627\u06A9 \u06A9\u0627\u0631\u0628\u0631 \u0645\u0646\u0642\u0636\u06CC \u0634\u062F\u0647 \u06CC\u0627 \u062D\u062C\u0645 \u0622\u0646 \u0628\u0647 \u067E\u0627\u06CC\u0627\u0646 \u0631\u0633\u06CC\u062F\u0647 \u0627\u0633\u062A. \u0644\u0637\u0641\u0627\u064B \u0627\u0628\u062A\u062F\u0627 \u0627\u0634\u062A\u0631\u0627\u06A9 \u062C\u062F\u06CC\u062F \u062A\u0647\u06CC\u0647 \u06A9\u0646\u06CC\u062F.",
+          subscription: user.subscription
+        });
       }
+      const prevInboundId = user.subscription.inboundId;
+      const prevClientUuid = user.subscription.clientUuid;
+      const remainingTrafficBytes = Math.max(
+        1,
+        user.subscription.trafficRemainingBytes || user.subscription.trafficTotalBytes
+      );
       const reqInbound = Number(inboundId);
       const switchResult = await provisionClientOnSanaei({
         email: user.email,
-        trafficBytes: user.subscription.trafficRemainingBytes || user.subscription.trafficTotalBytes,
+        trafficBytes: remainingTrafficBytes,
         expiryTimeMs: user.subscription.expiryTime,
         inboundId: reqInbound
       });
+      if (prevInboundId && prevClientUuid && prevClientUuid !== switchResult.client.id) {
+        deleteClientFromSanaei({ inboundId: prevInboundId, clientUuid: prevClientUuid }).catch(() => {
+        });
+      }
       user.subscription.inboundId = switchResult.inbound.id;
       user.subscription.inboundRemark = switchResult.inbound.remark;
       user.subscription.inboundProtocol = switchResult.inbound.protocol;
       user.subscription.inboundPort = switchResult.inbound.port;
+      user.subscription.clientEmail = switchResult.client.email;
+      user.subscription.clientUuid = switchResult.client.id;
       user.subscription.configUri = switchResult.configUri;
       user.subscription.subUrl = switchResult.subUrl;
+      user.subscription.lastSyncedAt = Date.now();
       bridgeStore.updateUser(user);
       res.json({
         success: true,
@@ -1978,9 +2161,12 @@ async function startServer() {
       });
     }
   });
-  app.get("/api/bridge/config/:identifier", (req, res) => {
-    const user = bridgeStore.findUserByIdOrEmail(req.params.identifier);
-    if (!user || !user.subscription || user.subscription.status !== "active") {
+  app.get("/api/bridge/config/:identifier", async (req, res) => {
+    let user = bridgeStore.findUserByIdOrEmail(req.params.identifier);
+    if (user) {
+      user = await syncUserSubscriptionWithSanaei(user);
+    }
+    if (!user || !user.subscription || user.subscription.status !== "active" || !user.subscription.configUri) {
       return res.status(404).send("No active subscription found for this user.");
     }
     if (req.query.format === "json") {
@@ -1988,15 +2174,21 @@ async function startServer() {
         configUri: user.subscription.configUri,
         protocol: user.subscription.inboundProtocol,
         uuid: user.subscription.clientUuid,
-        port: user.subscription.inboundPort
+        port: user.subscription.inboundPort,
+        trafficRemainingBytes: user.subscription.trafficRemainingBytes,
+        trafficRemainingGB: user.subscription.trafficRemainingGB,
+        remainingDays: user.subscription.remainingDays
       });
     }
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
     res.send(user.subscription.configUri);
   });
-  app.get("/api/bridge/sub/:identifier", (req, res) => {
-    const user = bridgeStore.findUserByIdOrEmail(req.params.identifier);
-    if (!user || !user.subscription?.configUri) {
+  app.get("/api/bridge/sub/:identifier", async (req, res) => {
+    let user = bridgeStore.findUserByIdOrEmail(req.params.identifier);
+    if (user) {
+      user = await syncUserSubscriptionWithSanaei(user);
+    }
+    if (!user || !user.subscription || user.subscription.status !== "active" || !user.subscription.configUri) {
       return res.status(404).send("");
     }
     const base64Data = Buffer.from(user.subscription.configUri).toString("base64");
@@ -2006,10 +2198,15 @@ async function startServer() {
   });
   app.get("/api/bridge/admin/overview", async (_req, res) => {
     try {
-      const users = bridgeStore.getAllUsers();
+      let users = bridgeStore.getAllUsers();
       const plans = bridgeStore.getPlans();
       const settings = bridgeStore.getSettings();
       const inbounds = await getActiveSanaeiInbounds();
+      users = await Promise.all(
+        users.map(
+          (u) => u.subscription?.status === "active" ? syncUserSubscriptionWithSanaei(u, inbounds) : Promise.resolve(u)
+        )
+      );
       const activeUsers = users.filter((u) => u.subscription?.status === "active");
       const now = Date.now();
       const onlineUsersCount = Math.max(

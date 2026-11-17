@@ -12,6 +12,8 @@ import {
   provisionClientOnSanaei,
   formatServersList,
   getActiveSanaeiInbounds,
+  syncUserSubscriptionWithSanaei,
+  deleteClientFromSanaei,
 } from './bridgeService';
 import { buildClientConfigUri } from './src/utils/sanaeiHelpers';
 import { BridgePlan } from './src/types/bridge';
@@ -972,10 +974,13 @@ async function startServer() {
           deviceId: deviceId || '',
         });
         isNewUser = true;
+      } else {
+        // Sync existing user's subscription & remaining traffic with Sanaei
+        user = await syncUserSubscriptionWithSanaei(user);
       }
 
-      // If client requested automatic subscription upon registration (e.g. 1 Month 10GB or free trial)
-      if (autoSubscribePlanId) {
+      // If client requested automatic subscription upon registration (only when no active sub exists)
+      if (autoSubscribePlanId && (!user.subscription || user.subscription.status !== 'active')) {
         const plan = bridgeStore.getPlanById(autoSubscribePlanId);
         if (plan) {
           const trafficBytes = plan.trafficGB * 1024 * 1024 * 1024;
@@ -995,9 +1000,15 @@ async function startServer() {
             trafficTotalGB: plan.trafficGB,
             trafficTotalBytes: trafficBytes,
             trafficUsedBytes: 0,
+            trafficUsedGB: 0,
             trafficRemainingBytes: trafficBytes,
+            trafficRemainingGB: plan.trafficGB,
+            trafficUsedPercent: 0,
             expiryTime: expiryTimeMs,
             remainingDays: plan.periodDays,
+            isExpired: false,
+            expiredReason: 'none',
+            lastSyncedAt: Date.now(),
             clientEmail: provisionResult.client.email,
             clientUuid: provisionResult.client.id,
             inboundId: provisionResult.inbound.id,
@@ -1016,14 +1027,15 @@ async function startServer() {
         }
       }
 
+      const isSubActive = user.subscription?.status === 'active';
       res.json({
         success: true,
         message: isNewUser ? 'ثبت‌نام کاربر در سیستم با موفقیت انجام شد.' : 'کاربر در سیستم یافت شد.',
         isNewUser,
         user,
         subscription: user.subscription,
-        configUri: user.subscription?.configUri || '',
-        hasActiveSubscription: user.subscription?.status === 'active',
+        configUri: isSubActive ? user.subscription?.configUri || '' : '',
+        hasActiveSubscription: isSubActive,
         availablePlans: bridgeStore.getPlans(),
       });
     } catch (err: any) {
@@ -1034,14 +1046,14 @@ async function startServer() {
     }
   });
 
-  // 3. User Login / Check State
-  app.post('/api/bridge/login', (req, res) => {
+  // 3. User Login / Check State (syncs real-time traffic & expiry from Sanaei)
+  app.post('/api/bridge/login', async (req, res) => {
     const { email, deviceId } = req.body;
     if (!email) {
       return res.status(400).json({ success: false, message: 'ایمیل یا نام کاربری الزامی است.' });
     }
 
-    const user = bridgeStore.findUserByIdOrEmail(email);
+    let user = bridgeStore.findUserByIdOrEmail(email);
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -1054,43 +1066,42 @@ async function startServer() {
       bridgeStore.updateUser(user);
     }
 
+    user = await syncUserSubscriptionWithSanaei(user);
+    const isSubActive = user.subscription?.status === 'active';
+
     res.json({
       success: true,
       user,
       subscription: user.subscription,
-      configUri: user.subscription?.configUri || '',
-      hasActiveSubscription: user.subscription?.status === 'active',
+      configUri: isSubActive ? user.subscription?.configUri || '' : '',
+      hasActiveSubscription: isSubActive,
       plans: bridgeStore.getPlans(),
     });
   });
 
-  // 4. Get User Profile & Subscription Status
-  app.get('/api/bridge/user/:identifier', (req, res) => {
-    const user = bridgeStore.findUserByIdOrEmail(req.params.identifier);
+  // 4. Get User Profile, Live Remaining Traffic & Subscription Status
+  app.get('/api/bridge/user/:identifier', async (req, res) => {
+    let user = bridgeStore.findUserByIdOrEmail(req.params.identifier);
     if (!user) {
       return res.status(404).json({ success: false, message: 'کاربر یافت نشد.' });
     }
 
-    // Calculate real-time remaining days
-    if (user.subscription && user.subscription.status === 'active' && user.subscription.expiryTime > 0) {
-      const diffMs = user.subscription.expiryTime - Date.now();
-      user.subscription.remainingDays = Math.max(0, Math.ceil(diffMs / (24 * 60 * 60 * 1000)));
-      if (diffMs <= 0) {
-        user.subscription.status = 'expired';
-      }
-    }
+    user = await syncUserSubscriptionWithSanaei(user);
+    const isSubActive = user.subscription?.status === 'active';
 
     res.json({
       success: true,
       user,
+      subscription: user.subscription,
+      hasActiveSubscription: isSubActive,
+      configUri: isSubActive ? user.subscription?.configUri || '' : '',
     });
   });
 
-  // 5. Purchase / Activate Subscription (e.g. 1 Month 10GB)
-  // This directly calls Sanaei 3X-UI, creates a client on the inbound, and returns the config URI!
+  // 5. Purchase / Activate New Subscription (Replaces expired or previous plan cleanly)
   app.post('/api/bridge/purchase', async (req, res) => {
     try {
-      const { email, userId, planId, inboundId } = req.body;
+      const { email, userId, planId, inboundId, switchOnly } = req.body;
       const targetIdentifier = email || userId;
 
       if (!targetIdentifier) {
@@ -1103,11 +1114,17 @@ async function startServer() {
         user = bridgeStore.createUser({ email: targetIdentifier });
       }
 
+      // Always sync live traffic & expiry with Sanaei first
+      user = await syncUserSubscriptionWithSanaei(user);
       const reqInbound = inboundId ? Number(inboundId) : undefined;
 
-      // If user already has an active subscription on Sanaei with configUri:
-      if (user.subscription && user.subscription.status === 'active' && user.subscription.configUri) {
-        // If same inbound or no specific inbound requested, return current config
+      // Only treat as a server-switch (without buying a new plan) if explicitly requested via switchOnly OR no planId was provided
+      if (
+        (switchOnly === true || !planId) &&
+        user.subscription &&
+        user.subscription.status === 'active' &&
+        user.subscription.configUri
+      ) {
         if (!reqInbound || reqInbound === user.subscription.inboundId) {
           return res.json({
             success: true,
@@ -1124,8 +1141,9 @@ async function startServer() {
           });
         }
 
-        // User requested a DIFFERENT inbound! Seamlessly switch server without deducting tokens
+        // Switch server using remaining traffic & remaining expiry
         try {
+          const prevSub = { ...user.subscription };
           const switchResult = await provisionClientOnSanaei({
             email: user.email,
             trafficBytes: user.subscription.trafficRemainingBytes || user.subscription.trafficTotalBytes,
@@ -1133,10 +1151,16 @@ async function startServer() {
             inboundId: reqInbound,
           });
 
+          if (prevSub.inboundId && prevSub.clientUuid) {
+            deleteClientFromSanaei({ inboundId: prevSub.inboundId, clientUuid: prevSub.clientUuid }).catch(() => {});
+          }
+
           user.subscription.inboundId = switchResult.inbound.id;
           user.subscription.inboundRemark = switchResult.inbound.remark;
           user.subscription.inboundProtocol = switchResult.inbound.protocol;
           user.subscription.inboundPort = switchResult.inbound.port;
+          user.subscription.clientEmail = switchResult.client.email;
+          user.subscription.clientUuid = switchResult.client.id;
           user.subscription.configUri = switchResult.configUri;
           user.subscription.subUrl = switchResult.subUrl;
           bridgeStore.updateUser(user);
@@ -1177,7 +1201,7 @@ async function startServer() {
         });
       }
 
-      // Provision on real Sanaei Panel
+      // Provision brand-new client on real Sanaei Panel
       const trafficBytes = plan.trafficGB * 1024 * 1024 * 1024;
       const expiryTimeMs = Date.now() + plan.periodDays * 24 * 60 * 60 * 1000;
 
@@ -1187,6 +1211,12 @@ async function startServer() {
         expiryTimeMs,
         inboundId: reqInbound || plan.inboundId,
       });
+
+      // Clean up old/expired client on Sanaei so old config stops working cleanly
+      const oldSub = user.subscription;
+      if (oldSub && oldSub.inboundId && oldSub.clientUuid && oldSub.clientUuid !== provisionResult.client.id) {
+        deleteClientFromSanaei({ inboundId: oldSub.inboundId, clientUuid: oldSub.clientUuid }).catch(() => {});
+      }
 
       // Deduct tokens
       if (plan.priceTokens > 0) {
@@ -1199,6 +1229,7 @@ async function startServer() {
         });
       }
 
+      // Completely replace previous/expired subscription with the new active plan
       user.subscription = {
         status: 'active',
         planId: plan.id,
@@ -1206,9 +1237,15 @@ async function startServer() {
         trafficTotalGB: plan.trafficGB,
         trafficTotalBytes: trafficBytes,
         trafficUsedBytes: 0,
+        trafficUsedGB: 0,
         trafficRemainingBytes: trafficBytes,
+        trafficRemainingGB: plan.trafficGB,
+        trafficUsedPercent: 0,
         expiryTime: expiryTimeMs,
         remainingDays: plan.periodDays,
+        isExpired: false,
+        expiredReason: 'none',
+        lastSyncedAt: Date.now(),
         clientEmail: provisionResult.client.email,
         clientUuid: provisionResult.client.id,
         inboundId: provisionResult.inbound.id,
@@ -1224,8 +1261,10 @@ async function startServer() {
 
       res.json({
         success: true,
+        replacedPrevious: Boolean(oldSub && oldSub.planId),
         message: `اشتراک «${plan.name}» با موفقیت فعال شد و کانفیگ اتصال اختصاصی صادر گردید.`,
         subscription: user.subscription,
+        hasActiveSubscription: true,
         configUri: provisionResult.configUri,
         subUrl: provisionResult.subUrl,
         user: {
@@ -1252,29 +1291,50 @@ async function startServer() {
         return res.status(400).json({ success: false, message: 'شناسه کاربر و شناسه این‌باند (inboundId) الزامی است.' });
       }
 
-      const user = bridgeStore.findUserByIdOrEmail(targetIdentifier);
+      let user = bridgeStore.findUserByIdOrEmail(targetIdentifier);
       if (!user) {
         return res.status(404).json({ success: false, message: 'کاربر یافت نشد.' });
       }
 
+      user = await syncUserSubscriptionWithSanaei(user);
+
       if (!user.subscription || user.subscription.status !== 'active') {
-        return res.status(400).json({ success: false, message: 'کاربر اشتراک فعالی ندارد. ابتدا اشتراک تهیه کنید.' });
+        return res.status(400).json({
+          success: false,
+          code: 'SUBSCRIPTION_EXPIRED',
+          message: 'اشتراک کاربر منقضی شده یا حجم آن به پایان رسیده است. لطفاً ابتدا اشتراک جدید تهیه کنید.',
+          subscription: user.subscription,
+        });
       }
+
+      const prevInboundId = user.subscription.inboundId;
+      const prevClientUuid = user.subscription.clientUuid;
+      const remainingTrafficBytes = Math.max(
+        1,
+        user.subscription.trafficRemainingBytes || user.subscription.trafficTotalBytes
+      );
 
       const reqInbound = Number(inboundId);
       const switchResult = await provisionClientOnSanaei({
         email: user.email,
-        trafficBytes: user.subscription.trafficRemainingBytes || user.subscription.trafficTotalBytes,
+        trafficBytes: remainingTrafficBytes,
         expiryTimeMs: user.subscription.expiryTime,
         inboundId: reqInbound,
       });
+
+      if (prevInboundId && prevClientUuid && prevClientUuid !== switchResult.client.id) {
+        deleteClientFromSanaei({ inboundId: prevInboundId, clientUuid: prevClientUuid }).catch(() => {});
+      }
 
       user.subscription.inboundId = switchResult.inbound.id;
       user.subscription.inboundRemark = switchResult.inbound.remark;
       user.subscription.inboundProtocol = switchResult.inbound.protocol;
       user.subscription.inboundPort = switchResult.inbound.port;
+      user.subscription.clientEmail = switchResult.client.email;
+      user.subscription.clientUuid = switchResult.client.id;
       user.subscription.configUri = switchResult.configUri;
       user.subscription.subUrl = switchResult.subUrl;
+      user.subscription.lastSyncedAt = Date.now();
       bridgeStore.updateUser(user);
 
       res.json({
@@ -1392,9 +1452,12 @@ async function startServer() {
   });
 
   // 7. Get raw VPN Config URI for User (for direct connection in App VPN core)
-  app.get('/api/bridge/config/:identifier', (req, res) => {
-    const user = bridgeStore.findUserByIdOrEmail(req.params.identifier);
-    if (!user || !user.subscription || user.subscription.status !== 'active') {
+  app.get('/api/bridge/config/:identifier', async (req, res) => {
+    let user = bridgeStore.findUserByIdOrEmail(req.params.identifier);
+    if (user) {
+      user = await syncUserSubscriptionWithSanaei(user);
+    }
+    if (!user || !user.subscription || user.subscription.status !== 'active' || !user.subscription.configUri) {
       return res.status(404).send('No active subscription found for this user.');
     }
 
@@ -1404,6 +1467,9 @@ async function startServer() {
         protocol: user.subscription.inboundProtocol,
         uuid: user.subscription.clientUuid,
         port: user.subscription.inboundPort,
+        trafficRemainingBytes: user.subscription.trafficRemainingBytes,
+        trafficRemainingGB: user.subscription.trafficRemainingGB,
+        remainingDays: user.subscription.remainingDays,
       });
     }
 
@@ -1412,9 +1478,12 @@ async function startServer() {
   });
 
   // 8. Subscription Link for Standard V2Ray / Xray mobile cores
-  app.get('/api/bridge/sub/:identifier', (req, res) => {
-    const user = bridgeStore.findUserByIdOrEmail(req.params.identifier);
-    if (!user || !user.subscription?.configUri) {
+  app.get('/api/bridge/sub/:identifier', async (req, res) => {
+    let user = bridgeStore.findUserByIdOrEmail(req.params.identifier);
+    if (user) {
+      user = await syncUserSubscriptionWithSanaei(user);
+    }
+    if (!user || !user.subscription || user.subscription.status !== 'active' || !user.subscription.configUri) {
       return res.status(404).send('');
     }
 
@@ -1427,10 +1496,17 @@ async function startServer() {
   // 9. Admin Overview (for our Web Panel)
   app.get('/api/bridge/admin/overview', async (_req, res) => {
     try {
-      const users = bridgeStore.getAllUsers();
+      let users = bridgeStore.getAllUsers();
       const plans = bridgeStore.getPlans();
       const settings = bridgeStore.getSettings();
       const inbounds = await getActiveSanaeiInbounds();
+
+      // Sync active users' live traffic & expiry against Sanaei inbounds
+      users = await Promise.all(
+        users.map((u) =>
+          u.subscription?.status === 'active' ? syncUserSubscriptionWithSanaei(u, inbounds) : Promise.resolve(u)
+        )
+      );
 
       const activeUsers = users.filter((u) => u.subscription?.status === 'active');
       const now = Date.now();

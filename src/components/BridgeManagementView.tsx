@@ -1241,7 +1241,43 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
 ۵. نحوه اتصال مستقیم VPN (دکمه Tap to Connect):
 ============================================================
 - اگر کاربر اشتراک فعال دارد (user.subscription.status === 'active')، با کلیک روی دکمه بزرگ دایره‌ای، مستقیماً از رشته configUri دریافت شده از ثنایی (vless://...) برای استارت هسته VPN استفاده کن.
-- اگر اشتراک نداشت، لیست پلن‌ها (GET /api/bridge/plans) را باز کن تا با توکن‌های خریداری شده یا هدیه‌اش (۱۰۰۰ توکن) اشتراک ۱ ماهه ۱۰ گیگ را فعال کند.`;
+- اگر اشتراک نداشت یا منقضی شده بود، لیست پلن‌ها (GET /api/bridge/plans) را باز کن تا با توکن‌های خریداری شده یا هدیه‌اش اشتراک جدید را فعال کند.
+
+============================================================
+۶. رفع کامل باگ ماندن اشتراک منقضی‌شده، جایگزینی خرید جدید و نمایش مانده حجم:
+============================================================
+- همگام‌سازی زنده وضعیت و مانده حجم با سرور:
+  • در هنگام باز شدن برنامه، ورود مجدد به صفحه اصلی (AppState foreground)، و بعد از قطع اتصال VPN، حتماً درخواست GET به {BASE_URL}/api/bridge/user/{email} بفرست.
+  • پاسخ سرور فیلدهای زیر را با اطلاعات واقعی پنل ثنایی برمی‌گرداند:
+    - hasActiveSubscription: boolean
+    - subscription.status: "active" | "expired" | "none"
+    - subscription.expiredReason: "none" | "time_expired" | "traffic_exhausted" | "disabled_on_panel" | "deleted_from_panel"
+    - subscription.trafficTotalBytes / subscription.trafficTotalGB (حجم کل)
+    - subscription.trafficUsedBytes / subscription.trafficUsedGB (حجم مصرف‌شده)
+    - subscription.trafficRemainingBytes / subscription.trafficRemainingGB (مانده حجم واقعی)
+    - subscription.trafficUsedPercent (درصد مصرف از ۰ تا ۱۰۰)
+    - subscription.remainingDays (روزهای باقی‌مانده)
+    - subscription.configUri (در صورت منقضی شدن خالی می‌شود)
+
+- پاک‌سازی خودکار اشتراک تمام‌شده / منقضی‌شده:
+  • هر زمان hasActiveSubscription === false یا subscription.status !== 'active' یا subscription.trafficRemainingBytes <= 0 یا subscription.remainingDays <= 0 بود:
+    1) بلافاصله اشتراک و configUri قدیمی کش‌شده در AsyncStorage / localStorage را پاک کن (یا status را به expired تغییر بده).
+    2) اگر VPN متصل بود، اتصال را قطع کن و کارت اشتراک را با پیام «اشتراک شما به پایان رسیده است (اتمام حجم یا زمان) — تمدید / خرید اشتراک جدید» نمایش بده.
+    3) به هیچ وجه کانفیگ یا نام پلن قبلی را به عنوان اشتراک فعال نشان نده!
+
+- جایگزینی فوری هنگام خرید اشتراک جدید:
+  • هنگام خرید پلن جدید از صفحه پلن‌ها، درخواست POST به {BASE_URL}/api/bridge/purchase با بدنه:
+    { "email": user.email, "planId": selectedPlan.id, "inboundId": selectedServerId }
+    ارسال کن (توجه: فیلد switchOnly را نفرست؛ فقط هنگام تعویض سرور از POST /api/bridge/switch-server استفاده کن).
+  • بلافاصله پس از دریافت پاسخ موفق (data.success === true):
+    1) تمام State اشتراک فعلی و حافظه ماندگار (user، subscription و configUri) را **کاملاً با data.subscription و data.configUri جدید جایگزین (Overwrite) کن** تا دیگر اشتراک قبلی نمایش داده نشود!
+    2) موجودی توکن را با data.user.tokens آپدیت کن.
+    3) اگر هسته VPN قبلاً روی کانفیگ قدیمی بود، کانفیگ جدید (data.configUri) را بارگذاری و متصل شو.
+
+- نمایش «مانده حجم» در رابط کاربری برنامه:
+  • در صفحه اصلی و کارت اشتراک فعال، یک نوار پیشرفت (Progress Bar) و برچسب واضح برای مانده حجم نمایش بده:
+    • اگر trafficRemainingBytes کمتر از ۱ گیگابایت بود به مگابایت نشان بده (مثلاً: «۶۴۰ MB مانده از ۱۰ GB»)، در غیر این صورت به گیگابایت (مثلاً: «۷.۴۵ GB مانده از ۱۰ GB»).
+    • در کنار آن مدت زمان باقی‌مانده (مثلاً: «۲۸ روز مانده») و حجم مصرف‌شده (trafficUsedGB) نیز نمایش داده شود.`;
 
 
 
@@ -3007,8 +3043,17 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
 
                   <div className="mt-3 text-center">
                     {simUser?.subscription?.status === 'active' ? (
-                      <span className="text-[11px] text-emerald-400 font-medium">
-                        اشتراک فعال: {simUser.subscription.planName} ({simUser.subscription.remainingDays} روز مانده)
+                      <div className="space-y-1">
+                        <span className="text-[11px] text-emerald-400 font-medium block">
+                          اشتراک فعال: {simUser.subscription.planName} ({simUser.subscription.remainingDays} روز مانده)
+                        </span>
+                        <span className="text-[10px] text-sky-300 font-mono block" dir="ltr">
+                          مانده حجم: {simUser.subscription.trafficRemainingGB ?? simUser.subscription.trafficTotalGB} GB / {simUser.subscription.trafficTotalGB} GB
+                        </span>
+                      </div>
+                    ) : simUser?.subscription?.status === 'expired' ? (
+                      <span className="text-[11px] text-rose-400 font-medium">
+                        اشتراک قبلی منقضی شده ({simUser.subscription.expiredReason === 'traffic_exhausted' ? 'اتمام حجم' : 'اتمام زمان'}) · خرید مجدد
                       </span>
                     ) : (
                       <span className="text-[11px] text-slate-400">
@@ -3132,6 +3177,11 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                     filteredUsers.map((u) => {
                       const sub = u.subscription;
                       const hasSub = sub && sub.status === 'active';
+                      const isExpiredSub = sub && sub.status === 'expired';
+                      const remGB =
+                        sub?.trafficRemainingGB !== undefined
+                          ? sub.trafficRemainingGB
+                          : Number(((sub?.trafficRemainingBytes || 0) / (1024 * 1024 * 1024)).toFixed(2));
                       return (
                         <tr key={u.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30">
                           <td className="py-3 px-4 font-mono font-semibold text-slate-900 dark:text-slate-100">
@@ -3144,15 +3194,29 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                           </td>
 
                           <td className="py-3 px-4 text-slate-800 dark:text-slate-200 font-semibold">
-                            {hasSub ? sub.planName : 'فاقد اشتراک'}
+                            {hasSub || isExpiredSub ? sub.planName : 'فاقد اشتراک'}
                           </td>
 
                           <td className="py-3 px-4 font-mono tabular-nums">
                             {hasSub ? (
-                              <div>
-                                <span>{sub.trafficTotalGB} گیگابایت</span>
-                                <span className="text-slate-400 mx-1">·</span>
-                                <span className="text-emerald-500">{sub.remainingDays} روز</span>
+                              <div className="space-y-0.5">
+                                <div>
+                                  <span className="text-sky-500 font-bold">{remGB} GB مانده</span>
+                                  <span className="text-slate-400 mx-1">از</span>
+                                  <span>{sub.trafficTotalGB} GB</span>
+                                </div>
+                                <div className="text-[11px] text-emerald-500">{sub.remainingDays} روز اعتبار</div>
+                              </div>
+                            ) : isExpiredSub ? (
+                              <div className="space-y-0.5 text-[11px] text-rose-400">
+                                <div>مانده: {remGB} GB از {sub.trafficTotalGB} GB</div>
+                                <div>
+                                  {sub.expiredReason === 'traffic_exhausted'
+                                    ? 'حجم تمام شده'
+                                    : sub.expiredReason === 'disabled_on_panel' || sub.expiredReason === 'deleted_from_panel'
+                                    ? 'غیرفعال شده در پنل'
+                                    : 'زمان به پایان رسیده'}
+                                </div>
                               </div>
                             ) : (
                               '-'
@@ -3160,7 +3224,7 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                           </td>
 
                           <td className="py-3 px-4 font-mono text-slate-600 dark:text-slate-400 uppercase">
-                            {hasSub ? (
+                            {hasSub || isExpiredSub ? (
                               <span className="px-2 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">
                                 #{sub.inboundId} · {sub.inboundRemark} ({sub.inboundPort})
                               </span>
@@ -3174,6 +3238,11 @@ export const BridgeManagementView: React.FC<BridgeManagementViewProps> = ({ onRe
                               <span className="inline-flex items-center gap-1.5 text-emerald-500 font-medium">
                                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                                 <span>متصل و فعال</span>
+                              </span>
+                            ) : isExpiredSub ? (
+                              <span className="inline-flex items-center gap-1.5 text-rose-500 font-medium">
+                                <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                                <span>منقضی شده</span>
                               </span>
                             ) : (
                               <span className="text-slate-400">ثبت اولیه</span>

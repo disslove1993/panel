@@ -244,3 +244,181 @@ export function formatServersList(inbounds: any[]): BridgeServerItem[] {
       };
     });
 }
+
+const BYTES_PER_GB = 1024 * 1024 * 1024;
+
+function toGB(bytes: number): number {
+  return Number((Math.max(0, bytes) / BYTES_PER_GB).toFixed(2));
+}
+
+export async function deleteClientFromSanaei(params: {
+  inboundId: number;
+  clientUuid: string;
+}): Promise<void> {
+  if (!sanaeiEngineRef || !params.inboundId || !params.clientUuid) return;
+  const settings = bridgeStore.getSettings();
+  if (!settings.sanaeiPanelUrl || !settings.sanaeiPanelUrl.trim()) return;
+
+  try {
+    const session = await sanaeiEngineRef.authenticatePanel({
+      panelUrl: settings.sanaeiPanelUrl,
+      webBasePath: settings.sanaeiWebBasePath,
+      username: settings.sanaeiUsername,
+      password: settings.sanaeiPassword,
+      allowInsecure: settings.allowInsecure,
+    });
+
+    const endpoints = [
+      `${session.fullBaseUrl}/panel/api/inbounds/${params.inboundId}/delClient/${params.clientUuid}`,
+      `${session.fullBaseUrl}/panel/inbound/${params.inboundId}/delClient/${params.clientUuid}`,
+    ];
+    for (const url of endpoints) {
+      try {
+        const res = await sanaeiEngineRef.performHttpRequest(url, {
+          method: 'POST',
+          headers: sanaeiEngineRef.buildAuthHeaders(session),
+          allowInsecure: settings.allowInsecure,
+          timeoutMs: 6000,
+        });
+        if (res.statusCode === 200) break;
+      } catch {
+        // continue trying fallback endpoint
+      }
+    }
+  } catch {
+    // non-fatal cleanup
+  }
+}
+
+export async function syncUserSubscriptionWithSanaei(
+  user: BridgeUser,
+  cachedInbounds?: any[]
+): Promise<BridgeUser> {
+  const sub = user.subscription;
+  if (!sub || sub.status === 'none' || !sub.planId) {
+    return user;
+  }
+
+  let dirty = false;
+  const prevStatus = sub.status;
+  const prevUsed = Number(sub.trafficUsedBytes || 0);
+  const prevRem = Number(sub.trafficRemainingBytes || 0);
+  const prevDays = Number(sub.remainingDays || 0);
+
+  let inbounds: any[] = [];
+  if (Array.isArray(cachedInbounds)) {
+    inbounds = cachedInbounds;
+  } else {
+    inbounds = await getActiveSanaeiInbounds();
+  }
+
+  let matchedClient: any = null;
+  let matchedInbound: any = null;
+
+  if (inbounds.length > 0) {
+    const preferredInb = inbounds.find((i) => i.id === sub.inboundId);
+    const searchOrder = preferredInb
+      ? [preferredInb, ...inbounds.filter((i) => i.id !== sub.inboundId)]
+      : inbounds;
+
+    for (const inb of searchOrder) {
+      const clients = Array.isArray(inb.clients) ? inb.clients : [];
+      const found = clients.find(
+        (c: any) =>
+          (sub.clientUuid && c.id === sub.clientUuid) ||
+          (sub.clientEmail && c.email === sub.clientEmail)
+      );
+      if (found) {
+        matchedClient = found;
+        matchedInbound = inb;
+        break;
+      }
+    }
+  }
+
+  let totalBytes = Number(sub.trafficTotalBytes || (sub.trafficTotalGB || 0) * BYTES_PER_GB);
+  let usedBytes = Number(sub.trafficUsedBytes || 0);
+  let expiryTime = Number(sub.expiryTime || 0);
+  let clientDisabled = false;
+  let clientDeleted = false;
+
+  if (matchedClient) {
+    usedBytes = (Number(matchedClient.up) || 0) + (Number(matchedClient.down) || 0);
+    if (Number(matchedClient.totalGB) > 0) {
+      totalBytes = Number(matchedClient.totalGB);
+    }
+    if (Number(matchedClient.expiryTime) > 0) {
+      expiryTime = Number(matchedClient.expiryTime);
+    }
+    if (matchedClient.enable === false || matchedInbound?.enable === false) {
+      clientDisabled = true;
+    }
+  } else if (
+    inbounds.length > 0 &&
+    sub.status === 'active' &&
+    sub.clientUuid &&
+    (!sub.subscribedAt || Date.now() - sub.subscribedAt > 30000)
+  ) {
+    // Client no longer exists on any inbound in Sanaei panel
+    clientDeleted = true;
+  }
+
+  const remainingBytes = totalBytes > 0 ? Math.max(0, totalBytes - usedBytes) : Math.max(0, Number(sub.trafficRemainingBytes || 0));
+  const now = Date.now();
+  const diffMs = expiryTime > 0 ? expiryTime - now : 1;
+  const remainingDays = expiryTime > 0 ? Math.max(0, Math.ceil(diffMs / (24 * 60 * 60 * 1000))) : sub.remainingDays;
+
+  let expiredReason: NonNullable<BridgeUserSubscription['expiredReason']> = 'none';
+  if (clientDeleted) {
+    expiredReason = 'deleted_from_panel';
+  } else if (clientDisabled) {
+    expiredReason = 'disabled_on_panel';
+  } else if (expiryTime > 0 && diffMs <= 0) {
+    expiredReason = 'time_expired';
+  } else if (totalBytes > 0 && remainingBytes <= 0) {
+    expiredReason = 'traffic_exhausted';
+  }
+
+  const isExpired = expiredReason !== 'none' || sub.status === 'expired';
+  if (isExpired && expiredReason === 'none') {
+    expiredReason = totalBytes > 0 && remainingBytes <= 0 ? 'traffic_exhausted' : 'time_expired';
+  }
+
+  sub.trafficTotalBytes = totalBytes;
+  sub.trafficTotalGB = toGB(totalBytes);
+  sub.trafficUsedBytes = usedBytes;
+  sub.trafficUsedGB = toGB(usedBytes);
+  sub.trafficRemainingBytes = isExpired && expiredReason === 'traffic_exhausted' ? 0 : remainingBytes;
+  sub.trafficRemainingGB = toGB(sub.trafficRemainingBytes);
+  sub.trafficUsedPercent = totalBytes > 0 ? Math.min(100, Math.round((usedBytes / totalBytes) * 100)) : 0;
+  sub.expiryTime = expiryTime;
+  sub.remainingDays = isExpired && expiredReason === 'time_expired' ? 0 : remainingDays;
+  sub.lastSyncedAt = now;
+
+  if (isExpired) {
+    sub.status = 'expired';
+    sub.isExpired = true;
+    sub.expiredReason = expiredReason;
+    sub.configUri = '';
+    sub.subUrl = '';
+  } else {
+    sub.status = 'active';
+    sub.isExpired = false;
+    sub.expiredReason = 'none';
+  }
+
+  if (
+    prevStatus !== sub.status ||
+    prevUsed !== sub.trafficUsedBytes ||
+    prevRem !== sub.trafficRemainingBytes ||
+    prevDays !== sub.remainingDays
+  ) {
+    dirty = true;
+  }
+
+  if (dirty) {
+    bridgeStore.updateUser(user);
+  }
+
+  return user;
+}

@@ -37,8 +37,14 @@ export interface BridgeUserSubscription {
   trafficTotalBytes: number;
   trafficUsedBytes: number;
   trafficRemainingBytes: number;
+  trafficUsedGB?: number;
+  trafficRemainingGB?: number;
+  trafficUsedPercent?: number;
   expiryTime: number; // Unix timestamp in ms
   remainingDays: number;
+  isExpired?: boolean;
+  expiredReason?: 'none' | 'time_expired' | 'traffic_exhausted' | 'disabled_on_panel' | 'deleted_from_panel';
+  lastSyncedAt?: number;
   clientEmail: string;
   clientUuid: string;
   inboundId: number;
